@@ -1,0 +1,59 @@
+Feature Selection:
+- name: Logistic Regression
+  params:
+    C: 1000.0
+    penalty: l1
+    tol: 1.0e-06
+
+Classifier:
+- name: Logistic Regression
+  params:
+    C: 10.0
+    penalty: l2
+    tol: 1.0e-01
+- name: MultinomialNB
+  params:
+    alpha: 0.001
+    fit_prior: true
+- name: kNN
+  params:
+    algorithm: auto
+- name: Perceptron
+  params:
+    alpha: 0.001
+    n_iter: 3
+- name: SVM
+  params:
+    C: 1.0
+    gamma: 100.0
+    kernel: linear
+- name: RBF SVM
+  params:
+    C: 1000.0
+    gamma: 1.0e-05
+    kernel: rbf
+- name: LinearSVC
+  params:
+    C: 1.0
+    penalty: l1
+    tol: 0.1
+- name: Expra Trees
+  params:
+    max_features: 0.7
+    min_samples_leaf: 20
+    n_estimators: 500
+- name: Random Forest
+  params:
+    max_features: 0.6
+    min_samples_leaf: 1
+    n_estimators: 400
+    class_weight: balanced
+- name: GB LinearSVC
+  params:
+    learning_rate: 0.6
+    loss: exponential
+    max_features: 0.6
+    min_samples_leaf: 20
+    n_estimators: 400
+    subsample: 0.7
+    warm_start: false

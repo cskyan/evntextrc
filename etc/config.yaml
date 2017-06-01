@@ -1,0 +1,58 @@
+evnt_extrc:
+- function: common
+  params:
+    mdl_cfg: mdlcfg
+
+bionlp.spider.bnlpst:
+- function: init
+  params:
+    DATA_PATH: 
+
+bionlp.util.plot:
+- function: init
+  params:
+    MON: False
+- function: common
+  params:
+    save_obj: False
+    save_npz: False
+
+bionlp.txtclf:
+- function: classification
+  params:
+    save_povl: True
+    save_povl_npz: False
+    save_spmnr: True
+    save_spmnr_npz: False
+    save_spmnr_pval: False
+    save_spmnr_pval_npz: False
+    save_featw: False
+    save_featw_npz: False
+    save_subfeatw: False
+    save_subfeatw_npz: False
+    plot_featw: False
+    plot_subfeatw: False
+- function: cross_validate
+  params:
+    save_crsval_idx: False
+    save_crsval_pred: False
+    save_perf_avg: True
+    save_perf_avg_npz: False
+    save_perf_std: False
+    save_perf_std_npz: False
+    save_povl: True
+    save_povl_npz: False
+    save_spmnr_avg: True
+    save_spmnr_avg_npz: False
+    save_spmnr_pval: False
+    save_spmnr_pval_npz: False
+    save_featw: False
+    save_featw_npz: False
+    save_subfeatw: False
+    save_subfeatw_npz: False
+    save_auc: True
+    plot_featw: False
+    plot_subfeatw: False
+    plot_roc: True
+    plot_prc: True
+    plot_metric: False
