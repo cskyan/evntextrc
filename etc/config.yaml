@@ -2,11 +2,20 @@ evnt_extrc:
 - function: common
   params:
     mdl_cfg: mdlcfg
+    npg_ratio: 
 
 bionlp.spider.bnlpst:
 - function: init
   params:
-    DATA_PATH: 
+    DATA_PATH:
+
+bionlp.spider.w2v:
+- function: init
+  params:
+    DATA_PATH:
+    W2V_MODEL:
+    MAX_CONN: 16
+    MAX_TRIAL: 5
 
 bionlp.util.plot:
 - function: init
@@ -20,6 +29,8 @@ bionlp.util.plot:
 bionlp.txtclf:
 - function: classification
   params:
+    to_hdf: True
+    hdf5_fpath:
     save_povl: True
     save_povl_npz: False
     save_spmnr: True
@@ -34,6 +45,9 @@ bionlp.txtclf:
     plot_subfeatw: False
 - function: cross_validate
   params:
+    to_hdf: True
+    hdf5_fpath:
+    npg_ratio:
     save_crsval_idx: False
     save_crsval_pred: False
     save_perf_avg: True

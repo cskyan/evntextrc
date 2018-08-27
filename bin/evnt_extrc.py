@@ -19,6 +19,7 @@ from collections import OrderedDict
 import numpy as np
 import pandas as pd
 
+from sklearn.preprocessing import label_binarize, MultiLabelBinarizer
 from sklearn.feature_selection import VarianceThreshold, SelectKBest, SelectPercentile, SelectFpr, SelectFromModel, chi2, f_classif
 from sklearn.naive_bayes import BernoulliNB, MultinomialNB
 from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
@@ -30,11 +31,10 @@ from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier, Baggi
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import FeatureUnion, Pipeline
 
-from bionlp import txtclf
-from bionlp import ftslct
-from bionlp.util import fs
-from bionlp.util import io
-from bionlp.util import func
+from bionlp import ftslct, txtclf
+from bionlp.model import kerasext, vecomnet
+from bionlp.util import fs, io, func
+import bionlp.util.math as imath
 import bionlp.spider.pubmed as pm
 
 import bnlpst
@@ -55,11 +55,13 @@ cfgr = None
 spdr = pm
 
 
-def load_data(mltl=False, pid=0, spfmt='csr'):
+def load_data(mltl=False, pid=0, spfmt='csr', **kwargs):
 	if (opts.scheme == 'trgs'):
-		return load_data_trgs(mltl=mltl, pid=pid, spfmt=spfmt)
+		return load_data_trgs(mltl=mltl, pid=pid, spfmt=spfmt, **kwargs)
 	elif (opts.scheme == 'trg'):
-		return load_data_trg(mltl=mltl, pid=pid, spfmt=spfmt)
+		return load_data_trg(mltl=mltl, pid=pid, spfmt=spfmt, **kwargs)
+	elif (opts.scheme.startswith('cbow')):
+		return load_data_cbow(mltl=mltl, pid=pid, spfmt=spfmt, **kwargs)
 		
 		
 def load_data_trgs(mltl=False, pid=0, spfmt='csr'):
@@ -67,37 +69,52 @@ def load_data_trgs(mltl=False, pid=0, spfmt='csr'):
 	try:
 		if (mltl):
 			# From combined data file
-			train_X, train_Y = spdr.get_data(None, from_file=True, dataset='train', fmt=opts.fmt, spfmt=opts.spfmt)
-			dev_X, dev_Y = spdr.get_data(None, from_file=True, dataset='dev', fmt=opts.fmt, spfmt=opts.spfmt)
-			test_X = spdr.get_data(None, from_file=True, dataset='test', fmt=opts.fmt, spfmt=opts.spfmt)
+			train_X, train_Y = spdr.get_data(None, method='trigger', scheme='trgs', from_file=True, dataset='train', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+			dev_X, dev_Y = spdr.get_data(None, method='trigger', scheme='trgs', from_file=True, dataset='dev', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+			test_X = spdr.get_data(None, method='trigger', scheme='trgs', from_file=True, dataset='test', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
 		else:
 			# From splited data file
-			train_Xs, train_Ys = spdr.get_mltl_npz([pid], dataset='train', spfmt=spfmt)
+			train_Xs, train_Ys = spdr.get_mltl_npz([pid], dataset='train', source=opts.year, task=opts.task, spfmt=spfmt)
 			train_X, train_Y = train_Xs[0], train_Ys[0]
-			dev_Xs, dev_Ys = spdr.get_mltl_npz([pid], dataset='dev', spfmt=spfmt)
+			dev_Xs, dev_Ys = spdr.get_mltl_npz([pid], dataset='dev', source=opts.year, task=opts.task, spfmt=spfmt)
 			dev_X, dev_Y = dev_Xs[0], dev_Ys[0]
-			test_Xs = spdr.get_mltl_npz([pid], dataset='test', spfmt=spfmt)
+			test_Xs = spdr.get_mltl_npz([pid], dataset='test', source=opts.year, task=opts.task, spfmt=spfmt)
 			test_X = test_Xs[0]
 	except Exception as e:
 		print e
 		print 'Can not find the data files!'
-		exit(1)
+		sys.exit(1)
 	return train_X, train_Y, dev_X, dev_Y, test_X
 
 
 def load_data_trg(mltl=False, pid=0, spfmt='csr'):
 	print 'Loading data...'
 	try:
-		train_word_X, train_word_y, train_edge_X, train_edge_Y = spdr.get_data(None, from_file=True, dataset='train', fmt=opts.fmt, spfmt=opts.spfmt)
-		dev_word_X, dev_word_y, dev_edge_X, dev_edge_Y = spdr.get_data(None, from_file=True, dataset='dev', fmt=opts.fmt, spfmt=opts.spfmt)
-		test_word_X, test_rawdata = spdr.get_data(None, from_file=True, dataset='test', fmt=opts.fmt, spfmt=opts.spfmt)
+		train_word_X, train_word_y, train_edge_X, train_edge_Y = spdr.get_data(None, method='trigger', scheme='trg', from_file=True, dataset='train', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+		dev_word_X, dev_word_y, dev_edge_X, dev_edge_Y = spdr.get_data(None, method='trigger', scheme='trg', from_file=True, dataset='dev', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+		test_word_X, test_rawdata = spdr.get_data(None, method='trigger', scheme='trg', from_file=True, dataset='test', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
 	except Exception as e:
 		print e
 		print 'Can not find the data files!'
-		exit(1)
+		sys.exit(1)
 	return train_word_X, train_word_y, train_edge_X, train_edge_Y, dev_word_X, dev_word_y, dev_edge_X, dev_edge_Y, test_word_X, test_rawdata
 	
 	
+def load_data_cbow(mltl=False, pid=0, spfmt='csr', ret_field='event'):
+	print 'Loading data...'
+	try:
+		train_Xs, train_Y = spdr.get_data(None, method='cbow', from_file=True, ret_field=ret_field, dataset='train', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+		dev_Xs, dev_Y = spdr.get_data(None, method='cbow', from_file=True, ret_field=ret_field, dataset='dev', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+		test_Xs, test_rawdata = spdr.get_data(None, method='cbow', from_file=True, ret_field=ret_field, dataset='test', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt)
+		if (not mltl):
+			train_Y, dev_Y = train_Y.iloc[:,pid].to_frame(), dev_Y.iloc[:,pid].to_frame()
+	except Exception as e:
+		print e
+		print 'Can not find the data files!'
+		sys.exit(1)
+	return train_Xs, train_Y, dev_Xs, dev_Y, test_Xs, test_rawdata
+	
+
 def build_model(mdl_func, mdl_t, mdl_name, tuned=False, pr=None, mltl=False, **kwargs):
 	if (tuned and bool(pr)==False):
 		print 'Have not provided parameter writer!'
@@ -106,6 +123,12 @@ def build_model(mdl_func, mdl_t, mdl_name, tuned=False, pr=None, mltl=False, **k
 		return OneVsRestClassifier(mdl_func(**func.update_dict(pr(mdl_t, mdl_name) if tuned else {}, kwargs)), n_jobs=opts.np)
 	else:
 		return mdl_func(**func.update_dict(pr(mdl_t, mdl_name) if tuned else {}, kwargs))
+		
+		
+def gen_keras(input_dim, output_dim, model='vecomnet', **kwargs):
+    mdl_map = {'vecomnet':(vecomnet.vecomnet_mdl, 'signedclf'), 'vecentnet':(vecomnet.vecentnet_mdl, 'mlclf'), 'mlmt_vecentnet':(vecomnet.mlmt_vecentnet_mdl, 'mlclf')}
+    mdl = mdl_map[model]
+    return kerasext.gen_mdl(input_dim, output_dim, mdl[0], mdl[1], backend=opts.dend, verbose=opts.verbose, **kwargs)
 
 
 # Feature Filtering Models
@@ -169,6 +192,21 @@ def gen_edge_featfilt(tuned=False, glb_filtnames=[]):
 	if (len(glb_filtnames) < len(filt_names)):
 		del glb_filtnames[:]
 		glb_filtnames.extend(filt_names)
+		
+		
+def gen_nn_featfilt(tuned=False, glb_filtnames=[]):
+	tuned = tuned or opts.best
+	common_cfg = cfgr('evnt_extrc', 'common')
+	pr = io.param_reader(os.path.join(PAR_DIR, 'etc', '%s.yaml' % common_cfg.setdefault('mdl_cfg', 'mdlcfg')))
+	filt_names = []
+	for filt_name, filter in [
+		('No Feature Filtering', None)
+	]:
+		yield filt_name, filter
+		filt_names.append(filt_name)
+	if (len(glb_filtnames) < len(filt_names)):
+		del glb_filtnames[:]
+		glb_filtnames.extend(filt_names)
 
 
 # Classification Models
@@ -178,7 +216,7 @@ def gen_clfs(tuned=False, glb_clfnames=[]):
 	pr = io.param_reader(os.path.join(PAR_DIR, 'etc', '%s.yaml' % common_cfg.setdefault('mdl_cfg', 'mdlcfg')))
 	clf_names = []
 	for clf_name, clf in [
-#		('RidgeClassifier', RidgeClassifier(tol=1e-2, solver='lsqr')),
+# 		('RidgeClassifier', RidgeClassifier(tol=1e-2, solver='lsqr')),
 #		('Perceptron', build_model(Perceptron, 'Classifier', 'Perceptron', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np)),
 #		('Passive-Aggressive', PassiveAggressiveClassifier(n_iter=50, n_jobs=1 if opts.mltl else opts.np)),
 #		('kNN', KNeighborsClassifier(n_neighbors=100, n_jobs=1 if opts.mltl else opts.np)),
@@ -232,6 +270,28 @@ def gen_edge_clfs(tuned=False, glb_clfnames=[]):
 		del glb_clfnames[:]
 		glb_clfnames.extend(clf_names)
 		
+		
+# Neural Network Classification model
+def gen_nnclf_models(input_dim, output_dim, epochs=1, batch_size=32, **kwargs):
+	def nnclf(tuned=False, glb_filtnames=[], glb_cltnames=[]):
+		tuned = tuned or opts.best
+		common_cfg = cfgr('gsx_extrc', 'common')
+		pr = io.param_reader(os.path.join(PAR_DIR, 'etc', '%s.yaml' % common_cfg.setdefault('mdl_cfg', 'mdlcfg')))
+		clt_names = []
+		for clt_name, clt in [
+			('VeComNet', gen_keras(input_dim, output_dim, model='vecomnet', w2v_path=kwargs.setdefault('w2v_path', 'wordvec.bin'), epochs=epochs, batch_size=batch_size))
+		]:
+			yield clt_name, clt
+			clt_names.append(clt_name)
+		if (other_clts is not None):
+			for clt_name, clt in other_clts(tuned, glb_filtnames, glb_clfnames):
+				yield clt_name, clt
+				clt_names.append(clt_name)
+		if (len(glb_cltnames) < len(clt_names)):
+			del glb_cltnames[:]
+			glb_cltnames.extend(clt_names)
+	return nnclf
+		
 
 # Benchmark Models
 def gen_bm_models(tuned=False, glb_filtnames=[], glb_clfnames=[]):
@@ -262,6 +322,18 @@ def gen_edge_bm_models(tuned=False, glb_filtnames=[], glb_clfnames=[]):
 			del clf
 		del filter
 		
+		
+def gen_nn_bm_models(input_dim, output_dim, epochs=1, batch_size=32, **kwargs):
+	def nnbm(tuned=False, glb_filtnames=[], glb_clfnames=[]):
+		# Feature Filtering Model
+		for filt_name, filter in gen_nn_featfilt(tuned, glb_filtnames):
+		# Classification Model
+			for clf_name, clf in gen_nnclf_models(input_dim, output_dim, epochs=epochs, batch_size=batch_size)(tuned, glb_clfnames):
+				yield filt_name, filter, clf_name, clf
+				del clf
+			del filter
+	return nnbm
+		
 	
 # Combined Models	
 def gen_cb_models(tuned=False, glb_filtnames=[], glb_clfnames=[]):
@@ -271,7 +343,7 @@ def gen_cb_models(tuned=False, glb_filtnames=[], glb_clfnames=[]):
 #	filtref_func = ftslct.filtref(os.path.join(spdr.DATA_PATH, 'X.npz'), os.path.join(spdr.DATA_PATH, 'union_filt_X.npz'))
 	for mdl_name, mdl in [
 		# ('RandomForest', Pipeline([('clf', build_model(RandomForestClassifier, 'Classifier', 'Random Forest', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np, random_state=0))])),
-		('UDT-RF', Pipeline([('featfilt', ftslct.MSelectKBest(ftslct.utopk, filtfunc=ftslct.decision_tree, k=500, fn=100)), ('clf', build_model(RandomForestClassifier, 'Classifier', 'Random Forest', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np, random_state=0))])),
+		# ('UDT-RF', Pipeline([('featfilt', ftslct.MSelectKBest(ftslct.utopk, filtfunc=ftslct.decision_tree, k=500, fn=100)), ('clf', build_model(RandomForestClassifier, 'Classifier', 'Random Forest', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np, random_state=0))])),
 		# ('RandomForest', Pipeline([('featfilt', SelectFromModel(DecisionTreeClassifier(criterion='entropy', class_weight='balanced', random_state=0))), ('clf', build_model(RandomForestClassifier, 'Classifier', 'Random Forest', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np, random_state=0))])),
 		# ('RbfSVM102-2', Pipeline([('clf', build_model(SVC, 'Classifier', 'RBF SVM 102-2', tuned=tuned, pr=pr, mltl=opts.mltl, probability=True))])),
 		# ('RbfSVM103-2', Pipeline([('clf', build_model(SVC, 'Classifier', 'RBF SVM 103-2', tuned=tuned, pr=pr, mltl=opts.mltl, probability=True))])),
@@ -280,15 +352,35 @@ def gen_cb_models(tuned=False, glb_filtnames=[], glb_clfnames=[]):
 		# ('DF-RbfSVM', Pipeline([('featfilt', ftslct.MSelectOverValue(ftslct.filtref(os.path.join(spdr.DATA_PATH, 'X.npz'), os.path.join(spdr.DATA_PATH, 'union_filt_X.npz'), os.path.join(spdr.DATA_PATH, 'orig_X.npz')))), ('clf', build_model(SVC, 'Classifier', 'RBF SVM', tuned=tuned, pr=pr, mltl=opts.mltl, probability=True))])),
 		('RbfSVM', Pipeline([('clf', build_model(SVC, 'Classifier', 'RBF SVM', tuned=tuned, pr=pr, mltl=opts.mltl, probability=True))])),
 		# ('L1-LinSVC', Pipeline([('clf', build_model(LinearSVC, 'Classifier', 'LinearSVC', tuned=tuned, pr=pr, mltl=opts.mltl, loss='squared_hinge', dual=False))])),
-		# ('Perceptron', Pipeline([('clf', build_model(Perceptron, 'Classifier', 'Perceptron', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np))])),
-		# ('MNB', Pipeline([('clf', build_model(MultinomialNB, 'Classifier', 'MultinomialNB', tuned=tuned, pr=pr, mltl=opts.mltl))])),
+		('Perceptron', Pipeline([('clf', build_model(Perceptron, 'Classifier', 'Perceptron', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=1 if opts.mltl else opts.np))])),
+		('MNB', Pipeline([('clf', build_model(MultinomialNB, 'Classifier', 'MultinomialNB', tuned=tuned, pr=pr, mltl=opts.mltl))])),
 #		('5NN', Pipeline([('clf', build_model(KNeighborsClassifier, 'Classifier', 'kNN', tuned=tuned, pr=pr, mltl=opts.mltl, n_neighbors=5, n_jobs=1 if opts.mltl else opts.np))])),
-		# ('MEM', Pipeline([('clf', build_model(LogisticRegression, 'Classifier', 'Logistic Regression', tuned=tuned, pr=pr, mltl=opts.mltl, dual=False))])),
+		('MEM', Pipeline([('clf', build_model(LogisticRegression, 'Classifier', 'Logistic Regression', tuned=tuned, pr=pr, mltl=opts.mltl, dual=False))])),
 		# ('LinearSVC with L2 penalty [Ft Filt] & Perceptron [CLF]', Pipeline([('featfilt', SelectFromModel(build_model(LinearSVC, 'Feature Selection', 'LinearSVC', tuned=tuned, pr=pr, mltl=opts.mltl, loss='squared_hinge', dual=False, penalty='l2'))), ('clf', build_model(Perceptron, 'Classifier', 'Perceptron', tuned=tuned, pr=pr, n_jobs=opts.np))])),
-		# ('ExtraTrees', Pipeline([('clf', build_model(ExtraTreesClassifier, 'Classifier', 'Extra Trees', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=opts.np))])),
-#		('Random Forest', Pipeline([('clf', build_model(RandomForestClassifier, 'Classifier', 'Random Forest', tuned=tuned, pr=pr, n_jobs=opts.np, random_state=0))]))
+		('ExtraTrees', Pipeline([('clf', build_model(ExtraTreesClassifier, 'Classifier', 'Extra Trees', tuned=tuned, pr=pr, mltl=opts.mltl, n_jobs=opts.np))])),
+		('Random Forest', Pipeline([('clf', build_model(RandomForestClassifier, 'Classifier', 'Random Forest', tuned=tuned, pr=pr, n_jobs=opts.np, random_state=0))]))
 	]:
 		yield mdl_name, mdl
+		
+		
+def gen_cbnn_models(input_dim, output_dim, epochs=1, batch_size=32, **kwargs):
+	def cbnn(tuned=False, glb_filtnames=[], glb_clfnames=[]):
+		tuned = tuned or opts.best
+		common_cfg = cfgr('evnt_extrc', 'common')
+		pr = io.param_reader(os.path.join(PAR_DIR, 'etc', '%s.yaml' % common_cfg.setdefault('mdl_cfg', 'mdlcfg')))
+		kw_args = dict([(arg, kwargs[param]) for param, arg in [('class_weight', 'class_weight'), ('pretrain_vecmdl', 'pretrain_vecmdl'), ('precomp_vec', 'precomp_vec'), ('test_ratio', 'validation_split')] if kwargs.has_key(param)])
+		if (opts.scheme == 'cbow_ent'):
+			models = [
+				('VecEntNet', gen_keras(input_dim, output_dim, model=kwargs.setdefault('prefered_mdl', 'vecentnet'), w2v_path=kwargs.setdefault('w2v_path', None), epochs=epochs, batch_size=batch_size, shuffle='batch', **kw_args)),
+				# ('MLMT VeEntNet', gen_keras(input_dim, output_dim, model='mlmt_' + kwargs.setdefault('prefered_mdl', 'vecentnet'), w2v_path=kwargs.setdefault('w2v_path', None), epochs=epochs, batch_size=batch_size, shuffle='batch', n_jobs=opts.np, **func.update_dict(kw_args, {'mlmt':True})))
+			]
+		elif (opts.scheme == 'cbow'):
+			models = [
+				('VeComNet', gen_keras(input_dim, output_dim, model=kwargs.setdefault('prefered_mdl', 'vecomnet'), w2v_path=kwargs.setdefault('w2v_path', None), epochs=epochs, batch_size=batch_size, shuffle='batch', **kw_args)),
+			]
+		for mdl_name, mdl in models:
+			yield mdl_name, mdl
+	return cbnn
 
 
 # Models with parameter range
@@ -472,7 +564,7 @@ def gen_mdl_params(rdtune=False):
 			# })
 		]:
 			yield mdl_name, mdl, params
-
+			
 			
 def post_process(data, type):
 	if (type == 'trigger'):
@@ -550,13 +642,6 @@ def post_process(data, type):
 		return pred_evnts
 		
 		
-def all():
-	if (opts.scheme == 'trgs'):
-		all_trgs()
-	elif (opts.scheme == 'trg'):
-		all_trg()
-		
-		
 def all_trgs():
 	global FILT_NAMES, CLF_NAMES, PL_NAMES, PL_SET, cfgr
 
@@ -580,7 +665,6 @@ def all_trgs():
 	global_param = dict(comb=opts.comb, pl_names=PL_NAMES, pl_set=PL_SET)
 	## Model training and prediction
 	txtclf.cross_validate(train_X, train_Y, model_iter, model_param, avg=opts.avg, kfold=opts.kfold, cfg_param=cfgr('bionlp.txtclf', 'cross_validate'), split_param={'shuffle':True}, global_param=global_param, lbid=pid)
-	exit(0)
 	preds, scores = txtclf.classification(train_X, train_Y, test_X, model_iter, model_param, cfg_param=cfgr('bionlp.txtclf', 'classification'), global_param=global_param, lbid=pid)
 	## Save results
 	for pl_name, pred in zip(PL_NAMES, preds):
@@ -675,13 +759,243 @@ def all_trg():
 				event_str = '\n'.join(['R%i %s %s:%s %s:%s' % (x, train_edge_Y.columns[events[x]['type']], events[x]['loprndtp'], events[x]['loprnd'], events[x]['roprndtp'], events[x]['roprnd']) for x in range(len(events))])
 				fs.write_file(event_str, os.path.join(store_path, '%s.a2' % docid))
 
+
+def all_cbow(fusion=False):
+	global FILT_NAMES, CLF_NAMES, PL_NAMES, PL_SET, cfgr
+	
+	if (opts.mltl):
+		pid = 'all'
+	else:
+		pid = opts.pid
+	print 'Process ID: %s' % pid
+
+	## Load data
+	train_Xs, train_Y, dev_Xs, dev_Y, test_Xs, test_rawdata = load_data(mltl=True, ret_field='event')
+	all_train_Xs, all_train_Y = ([pd.concat([train_X, dev_X]) for train_X, dev_X in zip(train_Xs, dev_Xs)], pd.concat([train_Y, dev_Y]).fillna(0).astype('int8')) if fusion else (train_Xs, train_Y)
+	if (not opts.mltl):
+		all_train_Y = all_train_Y.iloc[:,pid].to_frame()
+		common_cfg = cfgr('evnt_extrc', 'common')
+		npg_ratio = common_cfg.setdefault('npg_ratio', None)
+		if (npg_ratio is not None):
+			if (1.0 * all_train_Y.iloc[:,0].sum() / all_train_Y.shape[0] < 1.0 / (npg_ratio + 1)):
+				# all_true = all_train_Y.index[all_train_Y.iloc[:,0] > 0].tolist()
+				# all_false = all_train_Y.index[all_train_Y.iloc[:,0] <= 0].tolist()
+				all_true = np.arange(all_train_Y.shape[0])[all_train_Y.iloc[:,0] > 0].tolist()
+				all_false = np.arange(all_train_Y.shape[0])[all_train_Y.iloc[:,0] <= 0].tolist()
+				# Make a cut
+				# false_id = np.random.choice(len(all_false), size=int(1.0 * npg_ratio * len(all_true)), replace=False)
+				# false_idx = [all_false[i] for i in false_id]
+				# all_train_idx = all_true + false_idx
+				# Make a compensation
+				true_id = np.random.choice(len(all_true), size=int(1.0 / npg_ratio * len(all_false)), replace=True)
+				true_idx = [all_true[i] for i in true_id]
+				all_train_idx = true_idx + all_false
+				all_train_Xs = [x.iloc[all_train_idx] for x in all_train_Xs]
+				all_train_Y = all_train_Y.iloc[all_train_idx]
+	kwargs, signed = {}, True
+	if (opts.cache is not None and ':' in opts.cache):
+		cache_type, cache_path_str = opts.cache.split(':')
+		cache_paths = cache_path_str.split(SC)
+		if (cache_type == 'model'):
+			cache_path = cache_paths[0]
+			mdl_clf = io.read_obj(cache_path)
+			custom_objects = {}
+			custom_objects = func.update_dict(func.update_dict(custom_objects, kerasext.CUSTOM_METRIC), vecomnet.CUSTOM_LOSS)
+			mdl_clf.load(os.path.splitext(cache_path)[0], custom_objects=custom_objects)
+			kwargs['pretrain_vecmdl'] = mdl_clf.predict_model
+		elif (cache_type == 'pred' or cache_type == 'prob'):
+			data_key = {'pred':'pred_lb', 'prob':'pred_prob'}
+			data_path = cache_paths[0]
+			preds = [pd.read_hdf(data_path, key=cpath) for cpath in cache_paths[1:]]
+			# preds = [io.read_npz(cpath)[data_key[cache_type]] for cpath in cache_paths]
+			ds_shapes = [pred.shape[0] for pred in preds]
+			ds_shape, ds_count = np.unique(ds_shapes, return_counts=True)
+			if (ds_shape.size > 1):
+				if (np.unique(ds_count).size > 1):
+					raise ValueError('Inconsistant input data sets!')
+					print [pred.shape for pred in preds]
+				all_train_Xs = kwargs['precomp_vec'] = [pd.concat([preds[j] for j in range(i, len(preds), ds_count[0])]).fillna(0).astype('int8') for i in range(ds_count[0])]
+			else:
+				all_train_Xs = kwargs['precomp_vec'] = preds
+			if (not opts.mltl and 'all_train_idx' in locals()):
+				all_train_Xs = [x.loc[all_train_idx] for x in all_train_Xs]
+			test_Xs = [pd.read_hdf(data_path, key='cbow/test_pseudo_X%i' % i) for i in range(2)]
+		elif (cache_type == 'embed'):
+			if (pid == 'all' or pid == -1):
+				print 'Multi-class/Multi-label classification on argument embedding is not supported yet!'
+				sys.exit(-1)
+			data_path = cache_paths[0]
+			all_evnt_args = pd.read_hdf(data_path, key='cbow/train_ent_Y').columns.tolist()
+			evnt_type, lent_type, rent_type = all_train_Y.columns[0].split(':')
+			# evnt_args = spdr.EVNT_ARG_TYPE[opts.year][evnt_type]
+			evnt_args = [lent_type, rent_type]
+			evnt_arg_idx = [all_evnt_args.index(x) for x in evnt_args]
+			# Two possible direction / argument order
+			evnt_arg_idcs = [evnt_arg_idx, evnt_arg_idx[::-1]]
+			train_argvecs = [pd.concat([pd.read_hdf(data_path, key='cbow/train_argvec%i_X%i' % (arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
+			dev_argvecs = [pd.concat([pd.read_hdf(data_path, key='cbow/dev_argvec%i_X%i' % (arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
+			# train_argvecs = [pd.concat([pd.read_hdf(data_path, key='cbow/train_argvec%i_X%i' % (arg_idx, i)) for i in range(2)], axis=1) for arg_idx in evnt_arg_idx]
+			# dev_argvecs = [pd.concat([pd.read_hdf(data_path, key='cbow/dev_argvec%i_X%i' % (arg_idx, i)) for i in range(2)], axis=1) for arg_idx in evnt_arg_idx]
+			# all_train_Xs = kwargs['precomp_vec'] = [pd.concat([train_X, dev_X]) for train_X, dev_X in zip(train_argvecs, dev_argvecs)]
+			all_train_Xs = kwargs['precomp_vec'] = train_argvecs
+			if (not opts.mltl and 'all_train_idx' in locals()):
+				all_train_Xs = [x.iloc[all_train_idx] for x in all_train_Xs]
+			# test_Xs = [pd.concat([pd.read_hdf(data_path, key='cbow/test_argvec%i_X%i' % (arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
+			test_Xs = dev_argvecs
+	print 'Training dataset size of X and Y: %s' % str(([x.shape for x in all_train_Xs], all_train_Y.shape))
+
+	## Model building
+	kwargs.update(dict(input_dim=all_train_Xs[0].shape[1], output_dim=all_train_Y.shape[1] if len(all_train_Y.shape) > 1 else 1, epochs=opts.epoch, batch_size=opts.bsize, evnt_mlp_dim=32, class_weight=np.array([imath.mlb_clsw(all_train_Y.iloc[:,i], norm=True) for i in range(all_train_Y.shape[1])]).reshape((-1,)) if len(all_train_Y.shape)>1 and all_train_Y.shape[1]>1 else imath.mlb_clsw(all_train_Y, norm=True)))
+	# kwargs.update(dict(input_dim=all_train_Xs[0].shape[1], output_dim=all_train_Y.shape[1] if len(all_train_Y.shape) > 1 else 1, test_ratio=0.1, epochs=opts.epoch, batch_size=opts.bsize, evnt_mlp_dim=32, class_weight=np.array([imath.mlb_clsw(all_train_Y.iloc[:,i], norm=True) for i in range(all_train_Y.shape[1])]).reshape((-1,)) if len(all_train_Y.shape)>1 and all_train_Y.shape[1]>1 else imath.mlb_clsw(all_train_Y, norm=True)))
+	# Convert the directed labels into binary (optional, only for vecomnet)
+	all_train_Y = pd.DataFrame(np.column_stack([np.abs(all_train_Y.values).reshape((all_train_Y.shape[0],-1))] + [label_binarize(lb, classes=[-1,1,0])[:,1] for lb in (np.sign(all_train_Y.values).astype('int8').reshape((all_train_Y.shape[0],-1))).T]), index=all_train_Y.index, columns=all_train_Y.columns.tolist() + ['%s_Dir' % col for col in all_train_Y.columns])
+	print 'Modified training dataset size of X and Y: %s' % str(([x.shape for x in all_train_Xs], all_train_Y.shape))
+	orig_signed, orig_mltl = signed, opts.mltl
+	signed, opts.mltl = False, True
+	if (opts.dend is not None):
+		print 'DNN model parameters: %s' % {k:v for k, v in kwargs.items() if k != 'pretrain_vecmdl' and k != 'precomp_vec'}
+		model_iter = gen_cbnn_models(**kwargs) if opts.comb else gen_nn_bm_models(**kwargs)
+	else:
+		all_train_Xs = pd.concat(all_train_Xs, axis=1)
+		model_iter = gen_cb_models if opts.comb else gen_bm_models
+	model_param = dict(tuned=opts.best, glb_filtnames=FILT_NAMES, glb_clfnames=CLF_NAMES)
+	global_param = dict(signed=signed, comb=opts.comb, pl_names=PL_NAMES, pl_set=PL_SET)
+	print 'Extra model parameters: %s %s' % (model_param, global_param)
+	
+	## Training and prediction
+	if (opts.pred):
+		preds, scores = txtclf.classification(all_train_Xs, all_train_Y, test_Xs, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'classification'), global_param=global_param, lbid='' if orig_mltl else opts.pid)
+	else:
+		txtclf.cross_validate(all_train_Xs, all_train_Y, model_iter, model_param=model_param, avg=opts.avg, kfold=opts.kfold, cfg_param=cfgr('bionlp.txtclf', 'cross_validate'), split_param={'shuffle':True}, global_param=global_param)
+		
+	signed, opts.mltl = orig_signed, orig_mltl
+
+
+def entity_cbow(fusion=False):
+	global FILT_NAMES, CLF_NAMES, PL_NAMES, PL_SET, cfgr
+	
+	if (opts.mltl):
+		pid = 'all'
+	else:
+		pid = opts.pid
+	print 'Process ID: %s' % pid
+
+	## Load data
+	train_Xs, train_Y, dev_Xs, dev_Y, test_Xs, test_rawdata = load_data(mltl=True, ret_field='entity') # Develop dataset only has parts of the entity labels
+	all_train_Xs, all_train_Y = ([pd.concat([train_X, dev_X]) for train_X, dev_X in zip(train_Xs, dev_Xs)], pd.concat([train_Y, dev_Y]).fillna(0).astype('int8')) if fusion else (train_Xs, train_Y)
+	if (not opts.mltl):
+		all_train_Y = all_train_Y.iloc[:,pid].to_frame()
+		common_cfg = cfgr('evnt_extrc', 'common')
+		npg_ratio = common_cfg.setdefault('npg_ratio', None)
+		if (npg_ratio is not None):
+			if (1.0 * all_train_Y.iloc[:,0].sum() / all_train_Y.shape[0] < 1.0 / (npg_ratio + 1)):
+				# all_true = all_train_Y.index[all_train_Y.iloc[:,0] > 0].tolist()
+				# all_false = all_train_Y.index[all_train_Y.iloc[:,0] <= 0].tolist()
+				all_true = np.arange(all_train_Y.shape[0])[all_train_Y.iloc[:,0] > 0].tolist()
+				all_false = np.arange(all_train_Y.shape[0])[all_train_Y.iloc[:,0] <= 0].tolist()
+				# Make a cut
+				# false_id = np.random.choice(len(all_false), size=int(1.0 * npg_ratio * len(all_true)), replace=False)
+				# false_idx = [all_false[i] for i in false_id]
+				# all_train_idx = all_true + false_idx
+				# Make a compensation
+				true_id = np.random.choice(len(all_true), size=int(1.0 / npg_ratio * len(all_false)), replace=True)
+				true_idx = [all_true[i] for i in true_id]
+				all_train_idx = true_idx + all_false
+				all_train_Xs = [x.iloc[all_train_idx] for x in all_train_Xs]
+				all_train_Y = all_train_Y.iloc[all_train_idx]
+	print 'Training dataset size of X and Y: %s' % str(([x.shape for x in all_train_Xs] if type(all_train_Xs) is list else all_train_Xs.shape, all_train_Y.shape))
+
+	## Model building
+	kwargs = dict(input_dim=all_train_Xs[0].shape[1], output_dim=all_train_Y.shape[1] if len(all_train_Y.shape) > 1 else 1, epochs=opts.epoch, batch_size=opts.bsize, class_weight=np.array([imath.mlb_clsw(all_train_Y.iloc[:,i], norm=True) for i in range(all_train_Y.shape[1])]).reshape((-1,)) if len(all_train_Y.shape)>1 and all_train_Y.shape[1]>1 else imath.mlb_clsw(all_train_Y, norm=True))
+	# kwargs = dict(input_dim=all_train_Xs[0].shape[1], output_dim=all_train_Y.shape[1] if len(all_train_Y.shape) > 1 else 1, test_ratio=0.1, epochs=opts.epoch, batch_size=opts.bsize, class_weight=np.array([imath.mlb_clsw(all_train_Y.iloc[:,i], norm=True) for i in range(all_train_Y.shape[1])]).reshape((-1,)) if len(all_train_Y.shape)>1 and all_train_Y.shape[1]>1 else imath.mlb_clsw(all_train_Y, norm=True))
+	if (opts.dend is not None):
+		print 'DNN model parameters: %s' % kwargs
+		model_iter = gen_cbnn_models(prefered_mdl='vecentnet', **kwargs) if opts.comb else gen_nn_bm_models(**kwargs)
+	else:
+		all_train_Xs = pd.concat(all_train_Xs, axis=1)
+		model_iter = gen_cb_models if opts.comb else gen_bm_models
+	model_param = dict(tuned=opts.best, glb_filtnames=FILT_NAMES, glb_clfnames=CLF_NAMES)
+	global_param = dict(comb=opts.comb, pl_names=PL_NAMES, pl_set=PL_SET)
+	
+	## Training and prediction
+	if (opts.pred):
+		preds, scores = txtclf.classification(all_train_Xs, all_train_Y, test_Xs, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'classification'), global_param=global_param, lbid='' if opts.mltl else opts.pid)
+	else:
+		txtclf.cross_validate(all_train_Xs, all_train_Y, model_iter, model_param=model_param, avg=opts.avg, kfold=opts.kfold, cfg_param=cfgr('bionlp.txtclf', 'cross_validate'), split_param={'shuffle':True}, global_param=global_param)
+
+
+def all_entry():
+	if (opts.scheme == 'trgs'):
+		all_trgs()
+	elif (opts.scheme == 'trg'):
+		all_trg()
+	elif (opts.scheme == 'cbow'):
+		all_cbow(fusion=True)
+	elif (opts.scheme == 'cbow_ent'):
+		entity_cbow(fusion=True)
+
 	
 def tuning():
 	pass
 	
 	
 def demo():
-	pass
+	def _clear_globals():
+		global FILT_NAMES, CLF_NAMES, PL_NAMES, PL_SET
+		FILT_NAMES, CLF_NAMES, PL_NAMES = [[] for x in range(3)]
+		PL_SET = set([])
+		
+	import evnt_helper as helper
+	# Download the pre-generated datasets
+	
+	# Read meta data
+	data_path = os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5')
+	all_evnt_args = pd.read_hdf(data_path, key='cbow/train_ent_Y').columns.tolist()
+	all_events = pd.read_hdf(data_path, key='cbow/train_Y').columns.tolist()
+	# 5-fold cross-validation
+	opts.pred = False
+	opts.scheme = 'cbow_ent'
+	for i in range(len(all_evnt_args)):
+		opts.pid = i
+		entity_cbow(fusion=True)
+		_clear_globals()
+		
+	for i in range(len(all_events)):
+		opts.pid = i
+		all_cbow(fusion=True)
+		_clear_globals()
+	
+	# Prediction on development dataset
+	opts.pred = True
+	opts.scheme = 'cbow_ent'
+	for i in range(len(all_evnt_args)):
+		if (opts.cache is not None and opts.cache == 'skip'): break
+		opts.pid = i
+		if not (opts.cache is not None and os.path.exists(opts.cache) and os.path.exists(os.path.join(opts.cache, 'clf_pred_vecentnet_%i.npz' % i))):
+			_clear_globals()
+			entity_cbow()
+			mdl_dir = '.'
+		else:
+			mdl_dir = opts.cache
+		helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5'), ['cbow/train_X%i' % j for j in range(4)])
+		helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5'), ['cbow/dev_X%i' % j for j in range(4)])
+
+	opts.scheme = 'cbow'
+	orig_cache = opts.cache
+	opts.cache = 'embed:%s' % data_path
+	for i in range(len(all_events)):
+		opts.pid = i
+		_clear_globals()
+		all_cbow()
+	opts.cache = orig_cache
+	fnames = ['clf_pred_vecomnet_%i.npz' % i for i in range(len(all_events))]
+	preds = [io.read_npz(fname)['pred_lb'] for fname in fnames]
+	probs = [io.read_npz(fname)['pred_prob'] for fname in fnames]
+	pred = np.column_stack(preds)
+	prob = np.column_stack(probs)
+	pred_fpath = 'combined_pred_%s' % fnames[0].split('pred_')[1].strip('_0')
+	io.write_npz(dict(pred_lb=pred, pred_prob=prob), pred_fpath)
+	helper._pred2event(spdr, 'True', pred_fpath, data_path, test_X_paths=['cbow/dev_X%i' % i for i in range(4)], train_Y_path='cbow/train_Y', method='cbow', source=opts.year, task=opts.task)
 	
 
 def main():
@@ -691,7 +1005,7 @@ def main():
 	if (opts.method == 'demo'):
 		demo()
 		return
-	all()
+	all_entry()
 
 
 if __name__ == '__main__':
@@ -703,7 +1017,7 @@ if __name__ == '__main__':
 	op.add_option('-k', '--kfold', default=10, action='store', type='int', dest='kfold', help='indicate the K fold cross validation')
 	op.add_option('-p', '--pid', default=0, action='store', type='int', dest='pid', help='indicate the process ID')
 	op.add_option('-n', '--np', default=-1, action='store', type='int', dest='np', help='indicate the number of processes used for training')
-	op.add_option('-f', '--fmt', default='npz', help='data stored format: csv or npz [default: %default]')
+	op.add_option('-f', '--fmt', default='npz', help='data stored format: csv, npz, or h5 [default: %default]')
 	op.add_option('-s', '--spfmt', default='csr', help='sparse data stored format: csc or csr [default: %default]')
 	op.add_option('-t', '--tune', action='store_true', dest='tune', default=False, help='firstly tune the hyperparameters')
 	op.add_option('-r', '--rdtune', action='store_true', dest='rdtune', default=False, help='randomly tune the hyperparameters')
@@ -711,15 +1025,26 @@ if __name__ == '__main__':
 	op.add_option('-c', '--comb', action='store_true', dest='comb', default=False, help='run the combined methods')
 	op.add_option('-l', '--mltl', action='store_true', dest='mltl', default=False, help='use multilabel strategy')
 	op.add_option('-a', '--avg', default='micro', help='averaging strategy for performance metrics: micro or macro [default: %default]')
-	op.add_option('-e', '--scheme', default='trgs', type='str', dest='scheme', help='the scheme to generate data')
+	op.add_option('-e', '--scheme', default='cbow', type='str', dest='scheme', help='the scheme to generate data')
+	op.add_option('-d', '--dend', dest='dend', help='deep learning backend: tf or th')
+	op.add_option('-j', '--epoch', default=1, action='store', type='int', dest='epoch', help='indicate the epoch used in deep learning')
+	op.add_option('-z', '--bsize', default=32, action='store', type='int', dest='bsize', help='indicate the batch size used in deep learning')
+	op.add_option('-o', '--omp', action='store_true', dest='omp', default=False, help='use openmp multi-thread')
+	op.add_option('-g', '--gpunum', default=0, action='store', type='int', dest='gpunum', help='indicate the gpu device number')
+	op.add_option('-q', '--gpuq', dest='gpuq', help='prefered gpu device queue')
+	op.add_option('-w', '--cache', type='str', dest='cache', help='the pretrained model path or partial prediction path')
 	op.add_option('-i', '--input', default='bnlpst', help='input source: bnlpst or pbmd [default: %default]')
+	op.add_option('-y', '--year', default='2016', help='the year when the data is released: 2016 or 2011 [default: %default]')
+	op.add_option('-u', '--task', default='bb', help='the year when the data is released: 2016 or 2011 [default: %default]')
+	op.add_option('-x', '--pred', action='store_true', dest='pred', default=False, help='train the model and make predictions without cross-validation')
 	op.add_option('-m', '--method', help='main method to run')
+	op.add_option('-v', '--verbose', action='store_true', dest='verbose', default=False, help='display detailed information')
 
 	(opts, args) = op.parse_args()
 	if len(args) > 0:
 		op.print_help()
 		op.error('Please input options instead of arguments.')
-		exit(1)
+		sys.exit(1)
 
 	spdr = SPDR_MAP[opts.input]
 	# Parse config file
@@ -731,5 +1056,16 @@ if __name__ == '__main__':
 		plot_cfg = cfgr('bionlp.util.plot', 'init')
 		plot_common = cfgr('bionlp.util.plot', 'common')
 		txtclf.init(plot_cfg=plot_cfg, plot_common=plot_common)
-		
+
+	if (opts.dend is not None):
+		if (opts.dend == 'th' and opts.gpunum == 0 and opts.omp):
+			from multiprocessing import cpu_count
+			os.environ['OMP_NUM_THREADS'] = '4' if opts.tune else str(int(1.5 * cpu_count() / opts.np))
+		if (opts.gpuq is not None):
+			gpuq = [int(x) for x in opts.gpuq.split(',')]
+			dev_id = gpuq[opts.pid % len(gpuq)]
+		else:
+			dev_id = opts.pid % opts.gpunum if opts.gpunum > 0 else 0
+		kerasext.init(dev_id=dev_id, num_gpu=opts.gpunum, backend=opts.dend, num_process=opts.np, use_omp=opts.omp, verbose=opts.verbose)
+
 	main()

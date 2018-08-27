@@ -37,7 +37,7 @@ Classifier:
     C: 1.0
     penalty: l1
     tol: 0.1
-- name: Expra Trees
+- name: Extra Trees
   params:
     max_features: 0.7
     min_samples_leaf: 20

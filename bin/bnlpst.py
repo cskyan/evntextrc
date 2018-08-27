@@ -9,14 +9,7 @@
 ###########################################################################
 #
 
-import os
-import sys
-import re
-import math
-import operator
-import logging
-import string
-import itertools
+import os, re, sys, math, string, logging, operator, itertools
 from bisect import bisect
 from optparse import OptionParser
 from collections import OrderedDict
@@ -28,25 +21,19 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import shortest_path
 
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.preprocessing import MultiLabelBinarizer
-from sklearn.preprocessing import label_binarize
+from sklearn.preprocessing import MultiLabelBinarizer, LabelBinarizer, label_binarize
 
+from bionlp.spider import w2v
+from bionlp.util import fs, io, func
 from bionlp import nlp
-from bionlp.util import func
-from bionlp.util import io
-from bionlp.util import fs
 
 
 if sys.platform.startswith('win32'):
 	DATA_PATH = 'D:\\data\\bioevent\\bnlpst'
 elif sys.platform.startswith('linux2'):
 	DATA_PATH = os.path.join(os.path.expanduser('~'), 'data', 'bioevent', 'bnlpst')
-TRAIN_PATH = os.path.join(DATA_PATH, 'train')
-DEV_PATH = os.path.join(DATA_PATH, 'dev')
-TEST_PATH = os.path.join(DATA_PATH, 'test')
-TRGWD_PATH = os.path.join(DATA_PATH, 'trigger')
-EVNT_LB = {'2016':['Lives_In'], '2011':['RegulonDependence', 'BindTo', 'TranscriptionFrom', 'RegulonMember', 'SiteOf', 'TranscriptionBy', 'PromoterOf', 'PromoterDependence', 'ActionTarget', 'Interaction']}
-EVNT_ARG_TYPE = {'2016':{'Lives_In':['Bacteria', 'Location']}, '2011':{'RegulonDependence':['Regulon', 'Target'], 'BindTo':['Agent', 'Target'], 'TranscriptionFrom':['Transcription', 'Site'], 'RegulonMember':['Regulon', 'Member'], 'SiteOf':['Site', 'Entity'], 'TranscriptionBy':['Transcription', 'Agent'], 'PromoterOf':['Promoter', 'Gene'], 'PromoterDependence':['Promoter', 'Protein'], 'ActionTarget':['Action', 'Target'], 'Interaction':['Agent', 'Target']}}
+EVNT_LB = {'2016':['Lives_In'], '2013':['Localization', 'PartOf'], '2011':['RegulonDependence', 'BindTo', 'TranscriptionFrom', 'RegulonMember', 'SiteOf', 'TranscriptionBy', 'PromoterOf', 'PromoterDependence', 'ActionTarget', 'Interaction']}
+EVNT_ARG_TYPE = {'2016':{'Lives_In':['Bacteria', 'Location']}, '2013':{'Localization':['Bacterium', 'Localization'], 'PartOf':['Host', 'Part']}, '2011':{'RegulonDependence':['Regulon', 'Target'], 'BindTo':['Agent', 'Target'], 'TranscriptionFrom':['Transcription', 'Site'], 'RegulonMember':['Regulon', 'Member'], 'SiteOf':['Site', 'Entity'], 'TranscriptionBy':['Transcription', 'Agent'], 'PromoterOf':['Promoter', 'Gene'], 'PromoterDependence':['Promoter', 'Protein'], 'ActionTarget':['Action', 'Target'], 'Interaction':['Agent', 'Target']}}
 
 [STEM, POS, SPOS, ANNOT_TYPE, ANNOT_HASH] = [set([]) for x in range(5)]
 ft_offset = {'train':[], 'dev':[], 'test':[]}
@@ -55,29 +42,31 @@ prdcss = {}
 
 
 # Get the annotations, segmentations, and the dependcies from a1 file
-def get_preprcs(docids, dataset='train', method='spacy', source='2016'):
+def get_preprcs(docids, dataset='train', source='2016', task='bb', method='spacy', disable=[]):
 	preprcs = []
 	if (dataset == 'train'):
-		dir_path = TRAIN_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'train')
 	elif (dataset == 'dev'):
-		dir_path = DEV_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'dev')
 	elif (dataset == 'test'):
-		dir_path = TEST_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'test')
 	for did in docids:
-		preprcs.append(get_a1(os.path.join(dir_path, did + '.a1'), method=method, source=source))
+		preprcs.append(get_a1(os.path.join(dir_path, did + '.a1'), source=source, method=method, disable=disable))
 	return preprcs
 
 
-def get_a1(fpath, method='spacy', source='2016'):
+def get_a1(fpath, source='2016', task='bb', method='spacy', disable=[]):
 	if (source == '2016'):
-		return get_a1_2016(fpath, method=method)
+		return get_a1_2016(fpath, method=method, disable=disable)
+	elif (source == '2013'):
+		return get_a1_2013(fpath, method=method, disable=disable)
 	elif (source == '2011'):
-		return get_a1_2011(fpath, method=method)
+		return get_a1_2011(fpath, method=method, disable=disable)
 	
 	
-def get_a1_2016(fpath, method='spacy'):
+def get_a1_2016(fpath, method='spacy', disable=[]):
 	try:
-		title, text = '', []
+		title, [text, sent_bndry, gddfs, coref] = '', [[] for i in range(4)]
 		annots = {'id':[], 'type':[], 'loc':[], 'str':[], 'tkns':[]}	# Biological term annotation, a.k.a. named entity
 		words = {'id':[], 'loc':[], 'str':[], 'stem':[], 'pos':[], 'stem_pos':[], 'annot_id':[]} # Word tokenization
 		with open(fpath, 'r') as fd:
@@ -101,33 +90,94 @@ def get_a1_2016(fpath, method='spacy'):
 							loc_start = loc_right
 						else:
 							loc_list.append((loc_start, int(record[i])))
-							annots['str'].append(' '.join(record[(i + 1):]))
+							annots['str'].append(' '.join(record[(i + 1):]).strip())
 							break
 					annots['loc'].append(loc_list)
 	except:
 		print 'Can not open the file \'%s\'!' % fpath
-		exit(-1)
+		sys.exit(-1)
+	
+	if ('parse' in disable): return sent_bndry, words, annots, gddfs, coref
+
 	content = nlp.clean_text(title + '\n' + '\n'.join(text), encoding='' if method == 'spacy' else 'ascii')
 	# Replace the tokens that have character '.' to avoid incorrect sentence separation
 	for old_text, new_text in [(' %c.' % x, ' %cx' % x) for x in string.ascii_uppercase] + [(' gen.', ' genx'), (' Lb.', ' Lbx'), (' nov.', ' novx'), (' sp.', ' spx')]:
 		content = content.replace(old_text, new_text)
-	tokens, depends, coref = nlp.parse_all(content, method=method, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')))
-	sent_bndry = np.cumsum([0] + [len(sent) for sent in tokens])[:-1]
+	tokens, gddfs, coref = nlp.parse_all(content, method=method, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')), disable=['tag', 'entity'])
+	sent_bndry = np.cumsum([0] + [len(sent) for sent in tokens])
 	for token_list in tokens:
 		# words['str'].extend([token['str'] for token in token_list])
-		words['str'].extend([content[token['loc'][0]:token['loc'][1]] for token in token_list])
-		words['loc'].extend([token['loc'] for token in token_list])
-		words['stem'].extend([token['stem'] for token in token_list])
-		words['pos'].extend([token['pos'] for token in token_list])
-		words['stem_pos'].extend([token['stem_pos'] for token in token_list])
+		parsed_words = [content[token['loc'][0]:token['loc'][1]] for token in token_list]
+		words_res = nlp.del_punct(parsed_words, ret_idx=True)
+		if (len(words_res) > 0): continue
+		words_wop, wop_idx = words_res
+		words['str'].extend(words_wop)
+		words['loc'].extend([token_list[i]['loc'] for i in wop_idx])
+		words['stem'].extend([token_list[i]['stem'] for i in wop_idx])
+		words['pos'].extend([token_list[i]['pos'] for i in wop_idx])
+		words['stem_pos'].extend([token_list[i]['stem_pos'] for i in wop_idx])
 
 	# Map the annotations to the tokens
 	annots['tkns'], words['annot_id'] = nlp.annot_align(annots['loc'], words['loc'])
-	return sent_bndry, words, annots, depends, coref
+
+	return sent_bndry, words, annots, gddfs, coref
+	
+	
+def get_a1_2013(fpath, method='spacy', disable=[]):
+	try:
+		title, [text, sent_bndry, gddfs, coref] = '', [[] for i in range(4)]
+		annots = {'id':[], 'type':[], 'loc':[], 'str':[], 'tkns':[]}	# Biological term annotation, a.k.a. named entity
+		words = {'id':[], 'loc':[], 'str':[], 'stem':[], 'pos':[], 'stem_pos':[], 'annot_id':[]} # Word tokenization
+		with open(fpath, 'r') as fd:
+			for line in fd.readlines():
+				record = line.split()
+				annots['id'].append(record[0])
+				annots['type'].append(record[1])
+				# Extract multiple location pairs of one annotation
+				loc_start, loc_list = int(record[2]), []
+				for i in xrange(3, len(record)):
+					if (';' in record[i]):
+						loc_left, loc_right = [int(x) for x in record[i].split(';')][:2]
+						loc_list.append((loc_start, loc_left))
+						loc_start = loc_right
+					else:
+						loc_list.append((loc_start, int(record[i])))
+						annots['str'].append(' '.join(record[(i + 1):]).strip())
+						break
+				annots['loc'].append(loc_list)
+	except:
+		print 'Can not open the file \'%s\'!' % fpath
+		sys.exit(-1)
+	
+	if ('parse' in disable): return sent_bndry, words, annots, gddfs, coref
+
+	content = nlp.clean_text(''.join(fs.read_file('%s.txt' % os.path.splitext(fpath)[0])), encoding='' if method == 'spacy' else 'ascii')
+	# Replace the tokens that have character '.' to avoid incorrect sentence separation
+	for old_text, new_text in [(' %c.' % x, ' %cx' % x) for x in string.ascii_uppercase] + [(' gen.', ' genx'), (' Lb.', ' Lbx'), (' nov.', ' novx'), (' sp.', ' spx')]:
+		content = content.replace(old_text, new_text)
+	tokens, gddfs, coref = nlp.parse_all(content, method=method, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')), disable=['tag', 'entity'])
+	sent_bndry = np.cumsum([0] + [len(sent) for sent in tokens])
+	for token_list in tokens:
+		# words['str'].extend([token['str'] for token in token_list])
+		parsed_words = [content[token['loc'][0]:token['loc'][1]] for token in token_list]
+		words_res = nlp.del_punct(parsed_words, ret_idx=True)
+		if (len(words_res) == 0): continue
+		words_wop, wop_idx = words_res
+		words['str'].extend(words_wop)
+		words['loc'].extend([token_list[i]['loc'] for i in wop_idx])
+		words['stem'].extend([token_list[i]['stem'] for i in wop_idx])
+		words['pos'].extend([token_list[i]['pos'] for i in wop_idx])
+		words['stem_pos'].extend([token_list[i]['stem_pos'] for i in wop_idx])
+
+	# Map the annotations to the tokens
+	annots['tkns'], words['annot_id'] = nlp.annot_align(annots['loc'], words['loc'], error=1)
+
+	return sent_bndry, words, annots, gddfs, coref
 	
 
-def get_a1_2011(fpath, method='spacy'):
+def get_a1_2011(fpath, method='spacy', disable=[]):
 	try:
+		sent_bndry, gddfs, coref = [[] for i in range(3)]
 		annots = {'id':[], 'type':[], 'loc':[], 'str':[], 'tkns':[]}	# Biological term annotation, a.k.a. named entity
 		words = {'id':[], 'loc':[], 'str':[], 'stem':[], 'pos':[], 'stem_pos':[], 'annot_id':[]} # Word tokenization
 		depends = {'id':[], 'type':[], 'oprnd':[]} # Syntactic dependencies
@@ -139,7 +189,7 @@ def get_a1_2011(fpath, method='spacy'):
 					annots['id'].append(record[0])
 					annots['type'].append(record[1])
 					annots['loc'].append([(int(record[2]), int(record[3]))])
-					annots['str'].append(' '.join(record[4:]))
+					annots['str'].append(' '.join(record[4:]).strip())
 				if (line[0] == 'W'):
 					words['id'].append(record[0])
 					words['loc'].append((int(record[2]), int(record[3])))
@@ -152,82 +202,90 @@ def get_a1_2011(fpath, method='spacy'):
 					nlp.set_mt_point(words['id'].index(record[3]), words['id'].index(record[2]), record[1], dpnd_mt)
 	except:
 		print 'Can not open the file \'%s\'!' % fpath
-		exit(-1)
-
-	# Generate the Stems of tokens
-	words['stem'] = nlp.stem(words['str'])
-	words['stem_pos'] = [sp[1] for sp in nlp.pos(words['stem'])]
-	# Extract the part-of-speech from the annotations for every word
-	oprnds = []
-	pos_list = []
-	for i in xrange(len(depends['id'])):
-		operands, dpnd_tp = depends['oprnd'][i], depends['type'][i]
-		pos = []
-		#%%% Bad RE design, to be modified %%%#
-		match_rs = re.compile('.+:(.+)-(.+)\((.*)\)').match(dpnd_tp)
-		if (match_rs == None):
-			match_rs = re.compile('.+:(.+)-(.+)').match(dpnd_tp)
-		if (match_rs == None):
-			# Appositive, expressed as 'AS_$synonym'
-			match_rs = re.compile('(appos)').match(dpnd_tp)
-			words['pos'][words['id'].index(operands[0])] = 'AS_%s' % operands[1]
-			words['pos'][words['id'].index(operands[1])] = 'AS_%s' % operands[0]
-			continue
-		else:
-			pos.extend(match_rs.groups()[:2])
-		#%%%%%%#
-		if (len(pos) != len(operands)):
-			print "Annotation Error!"
-			continue
-		oprnds.extend(operands)
-		pos_list.extend(pos)
-	for x in xrange(len(oprnds)):
-		words['pos'][words['id'].index(oprnds[x])] = pos_list[x]
-
-	# Deal with appositive, link the synonym together into a list, assign the pos to each synonym according to the one has non-appos pos 
-	for x in xrange(len(words['pos'])):
-		match_rs = re.compile('^AS_(.*)').match(words['pos'][x])
-		identcls = [x]
-		while (match_rs):
-			wid = words['id'].index(match_rs.groups()[0])
-			# found the beginning word again
-			if (len(identcls) > 1 and identcls[0] == wid):
-				break
-			identcls.append(wid)
-			match_rs = re.compile('^AS_(.*)').match(words['pos'][identcls[-1]])
-		if (not match_rs): # The last identical word has non-appos pos
-			for y in identcls:
-				words['pos'][y] = words['pos'][identcls[-1]]
-		else:
-			for y in identcls:	# The last identical word does not have non-appos pos, namely found a cycle link
-				words['pos'][y] = ''
-			continue
-			
+		sys.exit(-1)
+	sent_bndry = np.array([0, len(words['str'])])
 	# Map the annotations to the tokens
 	annots['tkns'], words['annot_id'] = nlp.annot_align(annots['loc'], words['loc'])
+	
+	if ('parse' in disable): return sent_bndry, words, annots, gddfs, coref
+
+	# Generate the Stems of tokens
+	if ('stem' not in disable):
+		words['stem'] = nlp.stem(words['str'])
+		words['stem_pos'] = [sp[1] for sp in nlp.pos(words['stem'])]
+	# Extract the part-of-speech from the annotations for every word
+	if ('pos' not in disable):
+		oprnds = []
+		pos_list = []
+		for i in xrange(len(depends['id'])):
+			operands, dpnd_tp = depends['oprnd'][i], depends['type'][i]
+			pos = []
+			#%%% Bad RE design, to be modified %%%#
+			match_rs = re.compile('.+:(.+)-(.+)\((.*)\)').match(dpnd_tp)
+			if (match_rs == None):
+				match_rs = re.compile('.+:(.+)-(.+)').match(dpnd_tp)
+			if (match_rs == None):
+				# Appositive, expressed as 'AS_$synonym'
+				match_rs = re.compile('(appos)').match(dpnd_tp)
+				words['pos'][words['id'].index(operands[0])] = 'AS_%s' % operands[1]
+				words['pos'][words['id'].index(operands[1])] = 'AS_%s' % operands[0]
+				continue
+			else:
+				pos.extend(match_rs.groups()[:2])
+			#%%%%%%#
+			if (len(pos) != len(operands)):
+				print "Annotation Error!"
+				continue
+			oprnds.extend(operands)
+			pos_list.extend(pos)
+		for x in xrange(len(oprnds)):
+			words['pos'][words['id'].index(oprnds[x])] = pos_list[x]
+
+		# Deal with appositive, link the synonym together into a list, assign the pos to each synonym according to the one has non-appos pos 
+		for x in xrange(len(words['pos'])):
+			match_rs = re.compile('^AS_(.*)').match(words['pos'][x])
+			identcls = [x]
+			while (match_rs):
+				wid = words['id'].index(match_rs.groups()[0])
+				# found the beginning word again
+				if (len(identcls) > 1 and identcls[0] == wid):
+					break
+				identcls.append(wid)
+				match_rs = re.compile('^AS_(.*)').match(words['pos'][identcls[-1]])
+			if (not match_rs): # The last identical word has non-appos pos
+				for y in identcls:
+					words['pos'][y] = words['pos'][identcls[-1]]
+			else:
+				for y in identcls:	# The last identical word does not have non-appos pos, namely found a cycle link
+					words['pos'][y] = ''
+				continue
+			
 	# Grammatical dependency matrix
-	gdmt = nlp.dpnd_trnsfm(dpnd_mt, (len(words['str']), len(words['str'])))
-	gddf = pd.DataFrame(gdmt.tocsr().todense())
-	return annots, words, [gddf], [(0, len(words['str']))]
+	if ('dependency' not in disable):
+		gdmt = nlp.dpnd_trnsfm(dpnd_mt, (len(words['str']), len(words['str'])))
+		gddfs = [pd.DataFrame(gdmt.tocsr().todense())]
+	return sent_bndry, words, annots, gddfs, coref
 
 
 # Get the events from a2 file	
-def get_evnts(docids, dataset='train', source='2016'):
+def get_evnts(docids, dataset='train', source='2016', task='bb'):
 	event_list = []
 	if (dataset == 'train'):
-		dir_path = TRAIN_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'train')
 	elif (dataset == 'dev'):
-		dir_path = DEV_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'dev')
 	elif (dataset == 'test'):
-		dir_path = TEST_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'test')
 	for did in docids:
 		event_list.append(get_a2(os.path.join(dir_path, did + '.a2'), source=source))
 	return event_list
 
 	
-def get_a2(fpath, source='2016'):
+def get_a2(fpath, source='2016', task='bb'):
 	if (source == '2016'):
 		return get_a2_2016(fpath)
+	elif (source == '2013'):
+		return get_a2_2013(fpath)
 	elif (source == '2011'):
 		return get_a2_2011(fpath)
 	
@@ -247,7 +305,26 @@ def get_a2_2016(fpath):
 					events['oprnd_words'].append([[], []])
 	except:
 		print 'Can not open the file \'%s\'!' % fpath
-		exit(-1)
+		sys.exit(-1)
+	return events
+	
+	
+def get_a2_2013(fpath):
+	try:
+		events = {'id':[], 'type':[], 'oprnd_tps':[], 'oprnds':[], 'oprnd_words':[]} # Interaction events
+		with open(fpath, 'r') as fd:
+			for line in fd.readlines():
+				record = line.split()
+				if (line[0] == 'R'):
+					events['id'].append(record[0])
+					events['type'].append(record[1])
+					loprnd, roprnd = record[2].split(':'), record[3].split(':')
+					events['oprnd_tps'].append((loprnd[0], roprnd[0]))
+					events['oprnds'].append((loprnd[1], roprnd[1]))
+					events['oprnd_words'].append([[], []])
+	except:
+		print 'Can not open the file \'%s\'!' % fpath
+		sys.exit(-1)
 	return events
 	
 
@@ -266,43 +343,43 @@ def get_a2_2011(fpath):
 					events['oprnd_words'].append([[], []])
 	except:
 		print 'Can not open the file \'%s\'!' % fpath
-		exit(-1)
+		sys.exit(-1)
 	return events
 	
 
 # Get the document ids
-def get_docid(dataset='train'):
+def get_docid(dataset='train', source='2016', task='bb'):
 	if (dataset == 'train'):
-		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(TRAIN_PATH) if re.match(r'.*\.txt', fpath)]
+		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, source, task, 'train')) if re.match(r'.*\.txt', fpath)]
 	elif (dataset == 'dev'):
-		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(DEV_PATH) if re.match(r'.*\.txt', fpath)]
+		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, source, task, 'dev')) if re.match(r'.*\.txt', fpath)]
 	elif (dataset == 'test'):
-		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(TEST_PATH) if re.match(r'.*\.txt', fpath)]
+		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, source, task, 'test')) if re.match(r'.*\.txt', fpath)]
 	return files
 	
 
 # Get the document text
-def get_corpus(docids, dataset='train', ext_fmt='txt'):
+def get_corpus(docids, dataset='train', source='2016', task='bb', ext_fmt='txt'):
 	corpus = []
 	if (dataset == 'train'):
-		dir_path = TRAIN_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'train')
 	elif (dataset == 'dev'):
-		dir_path = DEV_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'dev')
 	elif (dataset == 'test'):
-		dir_path = TEST_PATH
+		dir_path = os.path.join(DATA_PATH, source, task, 'test')
 	for did in docids:
 		corpus.append(' '.join(fs.read_file(os.path.join(dir_path, did+'.%s'%ext_fmt), 'utf8')))
 	return corpus
 	
 	
-def get_data(raw_data, method='trigger', scheme='trgs', **kwargs):
+def get_data(raw_data, method='cbow', scheme='', **kwargs):
 	if (method == 'trigger'):
 		if (scheme == 'trgs'):
 			return get_data_trgs(raw_data, **kwargs)
 		elif (scheme == 'trg'):
 			return get_data_trg(raw_data, **kwargs)
-	elif (source == 'htm'):
-		return get_data_htm(raw_data, **kwargs)
+	elif (method == 'cbow'):
+		return get_data_cbow(raw_data, **kwargs)
 
 
 ## Start Trigger-based Approach ##
@@ -320,10 +397,10 @@ def get_trgwd(fpath):
 	return trg_wds
 
 
-def _find_trg(words, wid1, wid2, dist_mt, prdcs, source='2016', pos_type='universal'):
+def _find_trg(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_type='universal'):
 	global POS_WEIGHT
 	r_pos = re.compile(r'\b^'+r'$\b|\b^'.join(POS_WEIGHT[pos_type].keys())+r'$\b', flags=re.I | re.X)
-	trg_wds = get_trgwd(os.path.join(TRGWD_PATH, 'TRIGGERWORDS.txt'))
+	trg_wds = get_trgwd(os.path.join(os.path.join(DATA_PATH, source, task, 'trigger'), 'TRIGGERWORDS.txt'))
 	r_patn = re.compile(r'\b^'+r'$\b|\b^'.join(trg_wds)+r'$\b', flags=re.I | re.X)
 	trg_evntoprt = {'2016':['None'],'2011':['Action']}
 	r_evntoprt = re.compile(r'(?=('+'|'.join(trg_evntoprt[source])+r'))', flags=re.I | re.X)
@@ -344,7 +421,7 @@ def _find_trg(words, wid1, wid2, dist_mt, prdcs, source='2016', pos_type='univer
 	return trigger
 	
 	
-def find_trgs(words, wid1, wid2, dist_mt, prdcs, source='2016', pos_type='universal'):
+def find_trgs(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_type='universal'):
 	global POS_WEIGHT
 	r_pos = re.compile(r'|'.join(POS_WEIGHT[pos_type].keys()), flags=re.I | re.X)
 	prdc, triggers = wid1, []
@@ -368,7 +445,7 @@ def print_tokens(tokens, trg_lbs=None, annots=None):
 	return ' '.join(result)
 
 	
-def get_data_trgs(raw_data, from_file=None, dataset='train', ft_type='binary', max_df=1.0, min_df=1, fmt='npz', spfmt='csr', parser='spacy', source='2016', db_name='mesh2016', db_type='LevelDB', store_path='store'):
+def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', ft_type='binary', max_df=1.0, min_df=1, parser='spacy', db_name='mesh2016', db_type='LevelDB', store_path='store'):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -377,12 +454,12 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', ft_type='binary', m
 			file_name = from_file
 		if (dataset == 'test'):
 			print 'Reading file: %s' % (file_name[0])
-			return io.read_df(os.path.join(DATA_PATH, file_name[0]), with_idx=True, sparse_fmt=spfmt)
+			return io.read_df(os.path.join(DATA_PATH, source, task, file_name[0]), with_idx=True, sparse_fmt=spfmt)
 		print 'Reading file: %s and %s' % (file_name[0], file_name[1])
 		if (fmt == 'npz'):
-			return io.read_df(os.path.join(DATA_PATH, file_name[0]), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, file_name[1]), with_idx=True, sparse_fmt=spfmt)
+			return io.read_df(os.path.join(DATA_PATH, source, task, file_name[0]), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, file_name[1]), with_idx=True, sparse_fmt=spfmt)
 		else:
-			return pd.read_csv(os.path.join(DATA_PATH, file_name[0]), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, file_name[1]), index_col=0, encoding='utf8')
+			return pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[0]), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[1]), index_col=0, encoding='utf8')
 	if (source == '2011'):
 		pos_type = 'bnlpst2011'
 	elif (parser == 'spacy'):
@@ -525,7 +602,7 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', ft_type='binary', m
 	feat_cols = ['%s_%s' % (fset, w) for fset in ft_order for w in vft_dic[fset][1]]
 	feat_df = pd.DataFrame(feat_mt.todense(), index=evnt_index, columns=feat_cols)
 	if (dataset != 'test'):
-		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[tuple([lb] + EVNT_ARG_TYPE[source][lb]) for lb in bin_label[1]])
+		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[tuple([lb] + EVNT_ARG_TYPE[source][lb]) for lb in bin_label[1]], dtype='int8')
 
 	## Sampling
 	obj_samp_idx = np.random.random_integers(0, feat_df.shape[0] - 1, size=200).tolist()
@@ -536,24 +613,24 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', ft_type='binary', m
 
 	## Output the dataset
 	if (fmt == 'npz'):
-		io.write_df(feat_df, os.path.join(DATA_PATH, '%s_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
-		io.write_df(samp_feat_df, os.path.join(DATA_PATH, '%s_sample_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+		io.write_df(feat_df, os.path.join(DATA_PATH, source, task, '%s_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+		io.write_df(samp_feat_df, os.path.join(DATA_PATH, source, task, '%s_sample_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
 		if (dataset != 'test'):
-			io.write_df(label_df, os.path.join(DATA_PATH, '%s_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
-			io.write_df(samp_lb_df, os.path.join(DATA_PATH, '%s_sample_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+			io.write_df(label_df, os.path.join(DATA_PATH, source, task, '%s_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+			io.write_df(samp_lb_df, os.path.join(DATA_PATH, source, task, '%s_sample_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
 	else:
-		feat_df.to_csv(os.path.join(DATA_PATH, '%s_X.csv' % dataset), encoding='utf8')
-		samp_feat_df.to_csv(os.path.join(DATA_PATH, '%s_sample_X.csv' % dataset), encoding='utf8')
+		feat_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_X.csv' % dataset), encoding='utf8')
+		samp_feat_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_sample_X.csv' % dataset), encoding='utf8')
 		if (dataset != 'test'):
-			label_df.to_csv(os.path.join(DATA_PATH, '%s_Y.csv' % dataset), encoding='utf8')
-			samp_lb_df.to_csv(os.path.join(DATA_PATH, '%s_sample_Y.csv' % dataset), encoding='utf8')
+			label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_Y.csv' % dataset), encoding='utf8')
+			samp_lb_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_sample_Y.csv' % dataset), encoding='utf8')
 	if (dataset != 'test'):
 		return feat_df, label_df
 	else:
 		return feat_df
 
 		
-def get_data_trg(raw_data, from_file=None, dataset='train', ft_type='binary', max_df=1.0, min_df=1, fmt='npz', spfmt='csr', parser='spacy', source='2016'):
+def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', ft_type='binary', max_df=1.0, min_df=1, parser='spacy'):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -562,12 +639,12 @@ def get_data_trg(raw_data, from_file=None, dataset='train', ft_type='binary', ma
 			word_X_name, word_y_name, edge_X_name, edge_y_name = from_file
 		if (dataset == 'test'):
 			print 'Reading file: %s, %s' % (word_X_name, 'test_rawdata.pkl')
-			return io.read_df(os.path.join(DATA_PATH, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_obj(os.path.join(DATA_PATH, 'test_rawdata.pkl'))
+			return io.read_df(os.path.join(DATA_PATH, source, task, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
 		print 'Reading file: %s, %s, %s, %s' % (word_X_name, word_y_name, edge_X_name, edge_y_name)
 		if (fmt == 'npz'):
-			return io.read_df(os.path.join(DATA_PATH, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, word_y_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, edge_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, edge_y_name), with_idx=True, sparse_fmt=spfmt)
+			return io.read_df(os.path.join(DATA_PATH, source, task, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, word_y_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, edge_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, edge_y_name), with_idx=True, sparse_fmt=spfmt)
 		else:
-			return pd.read_csv(os.path.join(DATA_PATH, word_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, word_y_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, edge_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, edge_y_name), index_col=0, encoding='utf8')
+			return pd.read_csv(os.path.join(DATA_PATH, source, task, word_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, word_y_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, edge_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, edge_y_name), index_col=0, encoding='utf8')
 			
 	global ft_offset
 	idx_range, evnt_lb, dist_mt_list, r_pos = [0, 0], EVNT_LB[source], [], re.compile('.*V.*')
@@ -697,15 +774,15 @@ def get_data_trg(raw_data, from_file=None, dataset='train', ft_type='binary', ma
 	wm_cols = ft_order[0:3] + ['%s_%s' % (fset, w) for fset in ft_order[3:] for w in bft_dic[fset][1]]
 	word_df = pd.DataFrame(word_mt, columns=wm_cols)
 	if (fmt == 'npz'):
-		io.write_df(word_df, os.path.join(DATA_PATH, '%swX.npz'%dataset), sparse_fmt=spfmt, compress=True)
+		io.write_df(word_df, os.path.join(DATA_PATH, source, task, '%swX.npz'%dataset), sparse_fmt=spfmt, compress=True)
 	else:
-		word_df.to_csv(os.path.join(DATA_PATH, '%swX.csv'%dataset), encoding='utf8')
+		word_df.to_csv(os.path.join(DATA_PATH, source, task, '%swX.csv'%dataset), encoding='utf8')
 
 	if (dataset == 'test'):
 		# Save intermediate data
 		raw_data['word_offset'] = ft_offset[dataset]
 		raw_data['dist_mts'] = dist_mt_list
-		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, 'test_rawdata.pkl'))
+		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
 		return word_df, raw_data
 	else:
 		# Construct trigger label
@@ -722,37 +799,261 @@ def get_data_trg(raw_data, from_file=None, dataset='train', ft_type='binary', ma
 		edge_lb = pd.DataFrame(edge_lb_mt, columns=evnt_lb)
 		
 		if (fmt == 'npz'):
-			io.write_df(trg_lb, os.path.join(DATA_PATH, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(edge_df, os.path.join(DATA_PATH, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(edge_lb, os.path.join(DATA_PATH, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(trg_lb, os.path.join(DATA_PATH, source, task, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_df, os.path.join(DATA_PATH, source, task, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_lb, os.path.join(DATA_PATH, source, task, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
 		else:
-			trg_lb.to_csv(os.path.join(DATA_PATH, '%swY.csv'%dataset), encoding='utf8')
-			edge_df.to_csv(os.path.join(DATA_PATH, '%seX.csv'%dataset), encoding='utf8')
-			edge_lb.to_csv(os.path.join(DATA_PATH, '%seY.csv'%dataset), encoding='utf8')
+			trg_lb.to_csv(os.path.join(DATA_PATH, source, task, '%swY.csv'%dataset), encoding='utf8')
+			edge_df.to_csv(os.path.join(DATA_PATH, source, task, '%seX.csv'%dataset), encoding='utf8')
+			edge_lb.to_csv(os.path.join(DATA_PATH, source, task, '%seY.csv'%dataset), encoding='utf8')
 
 		return word_df, trg_lb, edge_df, edge_lb
 		
 ## End Trigger-based Approach ##
+  
+
+## Start Non-Trigger Approach ##
+
+def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', window_size=10, maxlen=None, npg_ratio=1.0):
+	# Read from local files
+	if (from_file):
+		if (type(from_file) == bool):
+			if (ret_field == 'all'):
+				file_name = (['%s_X%i.%s' % (dataset, i, fmt) for i in range(4)] + ['%s_ent_X%i.%s' % (dataset, i, fmt) for i in range(2)] + ['%s_pseudo_X%i.%s' % (dataset, i, fmt) for i in range(2)], ['%s_Y.%s' % (dataset, fmt), '%s_ent_Y.%s' % (dataset, fmt)])
+			elif (ret_field == 'event'):
+				file_name = (['%s_X%i.%s' % (dataset, i, fmt) for i in range(4)], '%s_Y.%s' % (dataset, fmt))
+			elif (ret_field == 'entity'):
+				file_name = (['%s_ent_X%i.%s' % (dataset, i, fmt) for i in range(2)], '%s_ent_Y.%s' % (dataset, fmt))
+			if (fmt == 'h5'):
+				x_fname = ['cbow/%s' % os.path.splitext(xfn)[0] for xfn in file_name[0]]
+				y_fname = 'cbow/%s' % os.path.splitext(file_name[1])[0] if (type(file_name[1]) != list) else ['cbow/%s' % os.path.splitext(yfn)[0] for yfn in file_name[1]]
+				file_name = x_fname, y_fname, 'dataset.h5'
+			# file_name = (['%s_X%i.%s' % (dataset, i, fmt) for i in range(4)], '%s_Y.%s' % (dataset, fmt)) if (fmt != 'h5') else (['cbow/%s_X%i' % (dataset, i) for i in range(4)], 'cbow/%s_Y' % dataset, 'dataset.h5')
+		else:
+			file_name = from_file
+		if (dataset == 'test'):
+			print 'Reading files: %s' % (', '.join(file_name[0]))
+			if (fmt == 'npz'):
+				return [io.read_df(os.path.join(DATA_PATH, source, task, fname), with_idx=True, sparse_fmt=None) for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+			elif (fmt == 'h5'):
+				return [pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=fname, iterator=iterator, chunksize=batch_size if iterator else None) for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+			else:
+				return [pd.read_csv(os.path.join(DATA_PATH, source, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+		print 'Reading files: %s and %s' % (', '.join(file_name[0]), file_name[1])
+		if (fmt == 'npz'):
+			return [io.read_df(os.path.join(DATA_PATH, source, task, fname), with_idx=True, sparse_fmt=None) for fname in file_name[0]], io.read_df(os.path.join(DATA_PATH, source, task, file_name[1]), with_idx=True, sparse_fmt=spfmt) if (type(file_name[1]) != list) else [io.read_df(os.path.join(DATA_PATH, source, task, y), with_idx=True, sparse_fmt=spfmt) for y in file_name[1]]
+		elif (fmt == 'h5'):
+			return [pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=fname, iterator=iterator, chunksize=batch_size if iterator else None) for fname in file_name[0]], pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=file_name[1], iterator=iterator, chunksize=batch_size if iterator else None) if (type(file_name[1]) != list) else [pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=y, iterator=iterator, chunksize=batch_size if iterator else None) for y in file_name[1]]
+		else:
+			return [pd.read_csv(os.path.join(DATA_PATH, source, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[1]), index_col=0, encoding='utf8') if (type(file_name[1]) != list) else [pd.read_csv(os.path.join(DATA_PATH, source, task, y), index_col=0, encoding='utf8') for y in file_name[1]]
+	from bionlp.model import vecomnet
+	w2v_wrapper = w2v.GensimW2VWrapper(w2v_path)
+	last_widx = w2v_wrapper.get_vocab_size() - 1
+	## Feature columns
+	evnt_index, cbow, annot_cbow, direction, label, entity_label = [[] for i in range(6)]
+	stat_oprnd_annot = {}
+	## Extract features from raw data
+	for docid, corpus, preprcs, events in itertools.izip(raw_data['docids'], raw_data['corpus'], raw_data['preprcs'], raw_data['evnts']):
+		sent_bndry, words, annots, depends, coref = preprcs
+		word_num, event_num = len(words['str']), len(events['id']) if dataset != 'test' else 0
+		words['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in words['str']]
+		annots['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in annots['type']]
+		## Construct pairs of entities, format: <sub_aid, obj_aid>:[(sub_aindex, obj_aindex), directions, labels, (sub_label, obj_label)]
+		entity_pairs = OrderedDict([((annots['id'][e_sub], annots['id'][e_obj]), [(e_sub, e_obj), [], [], []]) for e_sub, e_obj in itertools.permutations(range(len(annots['id'])), 2)])
+		ok_samples = []
+		## Add labels to the entity pairs
+		for i in xrange(event_num):
+			try:
+				entity_pairs[(events['oprnds'][i][0], events['oprnds'][i][1])][1].append(1)
+				entity_pairs[(events['oprnds'][i][0], events['oprnds'][i][1])][2].append(events['type'][i])
+				entity_pairs[(events['oprnds'][i][0], events['oprnds'][i][1])][3] = [events['oprnd_tps'][i][0], events['oprnd_tps'][i][1]]
+				entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][1].append(-1)
+				entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][2].append(events['type'][i])
+				entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][3] = [events['oprnd_tps'][i][1], events['oprnd_tps'][i][0]]
+				# Inconsistent annotation
+				if (EVNT_ARG_TYPE[source][events['type'][i]][0] != events['oprnd_tps'][i][0] or EVNT_ARG_TYPE[source][events['type'][i]][1] != events['oprnd_tps'][i][1]):
+					print 'Event type %s has argument alias: %s %s!' % (events['type'][i], events['oprnd_tps'][i][0], events['oprnd_tps'][i][1])
+					entity_pairs[(events['oprnds'][i][0], events['oprnds'][i][1])][3] = EVNT_ARG_TYPE[source][events['type'][i]]
+					entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][3] = EVNT_ARG_TYPE[source][events['type'][i]][::-1]
+				ok_samples.extend([events['oprnds'][i], events['oprnds'][i][::-1]])
+				idx_pair = annots['id'].index(events['oprnds'][i][0]), annots['id'].index(events['oprnds'][i][1])
+				stat_type = stat_oprnd_annot.setdefault(events['type'][i], [{},{}])
+				stat_type[0].setdefault(annots['type'][idx_pair[0]], 0)
+				stat_type[1].setdefault(annots['type'][idx_pair[1]], 0)
+				stat_type[0][annots['type'][idx_pair[0]]] += 1
+				stat_type[1][annots['type'][idx_pair[1]]] += 1
+			except KeyError:
+				print 'Key Error: %s in %s@%s' % (str((events['oprnds'][i][0], events['oprnds'][i][1])), docid, dataset)
+				idx_pair = annots['id'].index(events['oprnds'][i][0]), annots['id'].index(events['oprnds'][i][1])
+				sent_idx_pair = (bisect(sent_bndry, annots['tkns'][idx_pair[0]][0]) - 1, bisect(sent_bndry, annots['tkns'][idx_pair[1]][0]) - 1)
+				if (sent_idx_pair[0] != sent_idx_pair[1]):
+					print 'The event cross sentences: %s' % str((sent_idx_pair[0], sent_idx_pair[1]))
+					words0 = words['str'][sent_bndry[sent_idx_pair[0]]:sent_bndry[sent_idx_pair[0] + 1]] if sent_idx_pair[0] + 1 < len(sent_bndry) else words['str'][sent_bndry[-1]:]
+					words1 = words['str'][sent_bndry[sent_idx_pair[1]]:sent_bndry[sent_idx_pair[1] + 1]] if sent_idx_pair[1] + 1 < len(sent_bndry) else words['str'][sent_bndry[-1]:]
+					print '[%s] ' % annots['str'][idx_pair[0]] + ' '.join(words0) + '\n' + '[%s] ' % annots['str'][idx_pair[1]] + ' '.join(words1)
+		ng_all_samples = [k for k, v in entity_pairs.iteritems() if len(v[1]) == 0]
+		ng_allsamp_num = len(ng_all_samples)
+		if (dataset == 'test'):
+			output_samples = ng_all_samples
+			samp_idx = range(ng_allsamp_num)
+		else:
+			# Sampling the negative samples
+			ng_size = int(1.0 * npg_ratio * max(max(1, len(annots['id'])/2), (len(entity_pairs) - ng_allsamp_num)))
+			ng_sample_idx = np.random.choice(ng_allsamp_num, size=ng_size, replace=True if ng_allsamp_num < ng_size else False) if ng_allsamp_num>0 else []
+			ng_samples = []
+			for i in ng_sample_idx:
+				ng_samples.append(ng_all_samples[i])
+			output_samples = ok_samples + ng_samples
+			samp_idx = range(len(output_samples))
+			# np.random.shuffle(samp_idx)
+		for i in samp_idx:
+			e_sub, e_obj = entity_pairs[output_samples[i]][0]
+			cbow_list = vecomnet.get_cbow_context(words['embedding_id'], [annots['tkns'][e_sub], annots['tkns'][e_obj]], window_size=window_size, include_target=True)
+			# annot_cbow_list = vecomnet.get_cbow_context(annots['embedding_id'], [e_sub, e_obj], window_size=window_size/2, include_target=True)
+			cbow_list = cbow_list[0] + cbow_list[1]
+			for cl, annot_eid in zip(cbow_list, [annots['embedding_id'][e_sub]] * 2 + [annots['embedding_id'][e_obj]] * 2):
+				cl.append(annot_eid)
+			# annot_cbow_list = annot_cbow_list[0] + annot_cbow_list[1]
+			evnt_index.append('|'.join((docid, output_samples[i][0], output_samples[i][1])))
+			cbow.append(cbow_list)
+			# annot_cbow.append(annot_cbow_list)
+			direction.append(entity_pairs[output_samples[i]][1])
+			label.append(entity_pairs[output_samples[i]][2])
+			entity_label.append(entity_pairs[output_samples[i]][3])
+	if (len(stat_oprnd_annot) > 0): io.write_obj(stat_oprnd_annot, os.path.join(DATA_PATH, source, task, '%s_stat_oprnd_annot' % dataset))
+	## Feature Construction
+	from keras.preprocessing import sequence
+	cbow_seqs = [sequence.pad_sequences(x, maxlen=maxlen, dtype='int64', padding='pre', truncating='pre', value=last_widx) for x in zip(*cbow)]
+	feat_dfs = [pd.DataFrame(mt, index=evnt_index, columns=['cbow_%i'%i for i in range(mt.shape[1])], dtype='int64') for mt in cbow_seqs]
+	for i, df in enumerate(feat_dfs):
+		if (fmt == 'npz'):
+			io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
+		elif (fmt == 'h5'):
+			df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_X%i' % (dataset, i), format='table', data_columns=True)
+		else:
+			df.to_csv(os.path.join(DATA_PATH, source, task, '%s_X%i.npz' % (dataset, i)), encoding='utf8')
+	# Obtain the entity indices
+	lent_index = ['|'.join(idx.split('|')[:2]) for idx in evnt_index]
+	lent_feat_dfs = [x.set_index([lent_index]).reset_index().drop_duplicates(subset='index').set_index('index') for x in feat_dfs[:2]]
+	rent_index = ['|'.join(idx.split('|')[::2]) for idx in evnt_index]
+	rent_feat_dfs = [x.set_index([rent_index]).reset_index().drop_duplicates(subset='index').set_index('index') for x in feat_dfs[2:]]
+	ent_feat_dfs = [pd.concat([lfdf, rfdf], axis=0).reset_index().drop_duplicates(subset='index').set_index('index') for lfdf, rfdf in zip(lent_feat_dfs, rent_feat_dfs)]
+	## Label Construction
+	if (dataset != 'test'):
+		event_mlb = MultiLabelBinarizer()
+		bin_label = (event_mlb.fit_transform(label), event_mlb.classes_.tolist())
+		# Combine the binary labels and the directions
+		for i in xrange(len(direction)):
+			for j in range(len(direction[i])):
+				idx = bin_label[1].index(label[i][j])
+				bin_label[0][i][idx] = bin_label[0][i][idx] * direction[i][j]
+		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[':'.join([lb] + EVNT_ARG_TYPE[source][lb]) for lb in bin_label[1]], dtype='int8')
+		# Labels for entity types
+		lent_label, rent_label = zip(*[x if x else ['Unknown']*2 for x in entity_label])
+		# ent_label = lent_label
+		ent_label = lent_label + rent_label
+		ent_lbr = LabelBinarizer()
+		ent_bin_label = (ent_lbr.fit_transform(ent_label).astype('int8'), ent_lbr.classes_.tolist())
+		# ent_label_df = pd.DataFrame(ent_bin_label[0], index=lent_index, columns=ent_bin_label[1], dtype='int8').drop('Unknown', axis=1)
+		ent_label_df = pd.DataFrame(ent_bin_label[0], index=lent_index + rent_index, columns=ent_bin_label[1], dtype='int8').drop('Unknown', axis=1)
+		ent_label_cols = ent_label_df.columns
+		ent_label_df = ent_label_df.groupby(ent_label_df.index).sum(axis=0) # deal with duplicated indices
+		ent_label_df.columns = ent_label_cols
+		ent_label_df[ent_label_df > 1] = 1
+		ent_feat_dfs = [df.loc[ent_label_df.index] for df in ent_feat_dfs]
+		# Combine the labels of both entity types in a event
+		lent_idx, rent_idx = [], []
+		for idx in evnt_index:
+			docid, lent, rent = idx.split('|')
+			lent_idx.append('|'.join([docid, lent]))
+			rent_idx.append('|'.join([docid, rent]))
+		lent_df = ent_label_df.loc[lent_idx].reset_index().drop('index', axis=1).astype('int8')
+		rent_df = ent_label_df.loc[rent_idx].reset_index().drop('index', axis=1).astype('int8')
+		# Combine into one matrix
+		# ent_df = pd.concat([lent_df, rent_df], axis=1).astype('int8')
+		# ent_df.index, ent_df.columns = evnt_index, ['LF-%s' % col if i < ent_label_df.shape[1] else 'RT-%s' % col for i, col in enumerate(ent_df.columns)]
+		# Separate into two matrixes
+		# lent_df.index = evnt_index
+		# ent_df = lent_df
+		lent_df.index, rent_df.index = evnt_index, evnt_index
+		ent_dfs = [lent_df, rent_df]
+		if (fmt == 'npz'):
+			io.write_df(label_df, os.path.join(DATA_PATH, source, task, '%s_Y.npz' % dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(ent_label_df, os.path.join(DATA_PATH, source, task, '%s_ent_Y.npz' % dataset), sparse_fmt=spfmt, compress=True)
+			_ = [io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_feat_dfs)]
+			# io.write_df(ent_df, os.path.join(DATA_PATH, source, task, '%s_pseudo_X.npz' % dataset), sparse_fmt=None, compress=True)
+			_ = [io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_pseudo_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_dfs)]
+		elif (fmt == 'h5'):
+			label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_Y' % dataset, format='table', data_columns=True)
+			ent_label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_ent_Y' % dataset, format='table', data_columns=True)
+			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_ent_X%i' % (dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_feat_dfs)]
+			# ent_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_pseudo_X' % dataset, format='table', data_columns=True)
+			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_pseudo_X%i' % (dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_dfs)]
+		else:
+			label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_Y.csv' % dataset), encoding='utf8')
+			ent_label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_Y.csv' % dataset), encoding='utf8')
+			_ = [df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8') for i, df in enumerate(ent_feat_dfs)]
+			# ent_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_pseudo_X.csv' % dataset), encoding='utf8')
+			_ = [df.to_csv(os.path.join(DATA_PATH, source, task, '%s_pseudo_X%i.csv' % (dataset, i)), encoding='utf8') for i, df in enumerate(ent_dfs)]
+		# if (ret_field == 'all'): return feat_dfs + ent_feat_dfs + [ent_df], [label_df, ent_label_df]
+		if (ret_field == 'all'): return feat_dfs + ent_feat_dfs + ent_dfs, [label_df, ent_label_df]
+		return feat_dfs, label_df if (ret_field == 'event') else ent_feat_dfs, ent_label_df
+	else:
+		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+		for i, df in enumerate(ent_feat_dfs):
+			if (fmt == 'npz'):
+				io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
+			elif (fmt == 'h5'):
+				df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_ent_X%i' % (dataset, i), format='table', data_columns=True)
+			else:
+				df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8')
+		if (ret_field == 'all'): return feat_dfs + ent_feat_dfs, raw_data
+		return feat_dfs, raw_data if (ret_field == 'event') else ent_feat_dfs, raw_data
+
+## End Non-Trigger Approach ##
 
 
-def main():
-	pass
+## Reverse the predictions to raw data
+def pred2data(preds, method='cbow', scheme='', **kwargs):
+	if (method == 'trigger'):
+		if (scheme == 'trgs'):
+			return pred2data_trgs(preds, **kwargs)
+		elif (scheme == 'trg'):
+			return pred2data_trg(preds, **kwargs)
+	elif (method == 'cbow'):
+		return pred2data_cbow(preds, **kwargs)
+	
+		
+def pred2data_cbow(preds, source='2016', task='bb'):
+	events = {}
+	for i, row in preds.iterrows():
+		docid, lent, rent = row.name.split('|')
+		for evnt_args, direction in row[row!=0].iteritems():
+			evnt_type, lent_type, rent_type = evnt_args.split(':')
+			if (direction == -1): lent_type, lent, rent_type, rent = rent_type, rent, lent_type, lent
+			if (EVNT_ARG_TYPE[source][evnt_type][0] != lent_type or EVNT_ARG_TYPE[source][evnt_type][1] != rent_type): continue
+			events.setdefault(docid, []).append((evnt_type, ':'.join([lent_type, lent]), ':'.join([rent_type, rent])))
+	return events
+			
 
-
-if __name__ == '__main__':
-	# Logging setting
-	logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-
-	# Parse commandline arguments
-	op = OptionParser()
-	op.add_option('-f', '--fmt', default='npz', help='data stored format: csv or npz [default: %default]')
-	op.add_option('-s', '--spfmt', default='csr', help='sparse data stored format: csr or csc [default: %default]')
-	op.add_option('-t', '--type', default='binary', help='feature type: binary, numeric, tfidf or mixed [default: %default]')
-
-	(opts, args) = op.parse_args()
-	if len(args) > 0:
-		op.print_help()
-		op.error('Please input options instead of arguments.')
-		exit(1)
-
-	main()
+def to_a2(events, dir_path='.', source='2016', task='bb'):
+	if (source == '2016'):
+		to_a2_2016(events, dir_path)
+	elif (source == '2013'):
+		to_a2_2016(events, dir_path)
+	elif (source == '2011'):
+		to_a2_2011(events, dir_path)
+		
+		
+def to_a2_2011(events, dir_path='.'):
+	fs.mkdir(dir_path)
+	for docid, event_list in events.iteritems():
+		content = '\n'.join(['E%i\t%s' % (i+1, x) for i, x in enumerate(list(set([' '.join(evnt) for evnt in event_list])))]) + '\n'
+		fs.write_file(content, os.path.join(dir_path, '%s.a2' % docid))
+		
+		
+def to_a2_2016(events, dir_path='.'):
+	fs.mkdir(dir_path)
+	for docid, event_list in events.iteritems():
+		content = '\n'.join(['R%i\t%s' % (i+1, x) for i, x in enumerate(list(set([' '.join(evnt) for evnt in event_list])))]) + '\n'
+		fs.write_file(content, os.path.join(dir_path, '%s.a2' % docid))
