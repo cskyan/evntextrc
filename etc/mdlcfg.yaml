@@ -57,3 +57,15 @@ Classifier:
     n_estimators: 400
     subsample: 0.7
     warm_start: false
+
+NeuralNetwork:
+- name: VecEntNet
+  params:
+    lstm_dim: 128
+    mlp_dim: 128
+    drop_ratio: 0.2
+    
+- name: VeComNet
+  params:
+    evnt_mlp_dim: 128
+    drop_ratio: 0.2
