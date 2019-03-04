@@ -23,6 +23,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import Normalizer
 from sklearn.decomposition import LatentDirichletAllocation, NMF, TruncatedSVD
 
+from bionlp.spider import w2v
 import bionlp.spider.pubmed as pm
 import bionlp.spider.metamap as mm
 import bionlp.ftslct as ftslct
@@ -43,11 +44,22 @@ cfgr = None
 spdr = pm
 
 
+def stat_dataset(dataset, ds_name):
+	preprcs = dataset['preprcs']
+	word_count = []
+	for sent_bndry, words, annots, gddfs, coref in preprcs:
+		word_count.append(len(words['str']))
+	print 'The average word number in each document of %s dataset is: %i' % (ds_name, np.mean(word_count))
+	io.write_npz(np.array(word_count), fpath='%s_wordcount' % ds_name)
+
+
 def gen_data(scheme='trgs'):
 	if (scheme == 'trgs'):
 		return gen_data_trgs()
 	elif (scheme == 'trg'):
 		return gen_data_trg()
+	elif (scheme == 'jointee'):
+		return gen_data_jointee()
 	elif (scheme == 'cbow'):
 		return gen_data_cbow()
 		
@@ -120,11 +132,11 @@ def gen_data_trg():
 		print 'Testing Set: word matrix size: %s.' % str(test_word_X.shape)
 		
 		
-def gen_data_cbow():
+def gen_data_jointee():
 	if (opts.local):
-		train_Xs, train_Y = spdr.get_data(None, method='cbow', from_file=True, dataset='train', source=opts.year, task=opts.task)
-		dev_Xs, dev_Y = spdr.get_data(None, method='cbow', from_file=True, dataset='dev', source=opts.year, task=opts.task)
-		test_Xs = spdr.get_data(None, method='cbow', from_file=True, dataset='test', source=opts.year, task=opts.task)
+		train_Xs, train_Y = spdr.get_data(None, method='jointee', from_file=True, dataset='train', source=opts.year, task=opts.task)
+		dev_Xs, dev_Y = spdr.get_data(None, method='jointee', from_file=True, dataset='dev', source=opts.year, task=opts.task)
+		test_Xs = spdr.get_data(None, method='jointee', from_file=True, dataset='test', source=opts.year, task=opts.task)
 	else:
 		train_docids, dev_docids, test_docids = spdr.get_docid(dataset='train', source=opts.year, task=opts.task), spdr.get_docid(dataset='dev', source=opts.year, task=opts.task), spdr.get_docid(dataset='test', source=opts.year, task=opts.task)
 		train_raw_data = {
@@ -146,9 +158,46 @@ def gen_data_cbow():
 			'evnts':[[]] * len(test_docids)
 		}
 		kwargs = {} if opts.cfg is None else ast.literal_eval(opts.cfg)
-		train_Xs, train_Y = spdr.get_data(train_raw_data, method='cbow', ret_field='all', dataset='train', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), window_size=kwargs.setdefault('window_size', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0))
-		dev_Xs, dev_Y = spdr.get_data(dev_raw_data, method='cbow', ret_field='all', dataset='dev', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), window_size=kwargs.setdefault('window_size', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0))
-		test_Xs, test_rawdata = spdr.get_data(test_raw_data, method='cbow', ret_field='all', dataset='test', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), window_size=kwargs.setdefault('window_size', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0))
+		train_Xs, train_Y = spdr.get_data(train_raw_data, method='jointee', ret_field='all', dataset='train', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), window_size=kwargs.setdefault('window_size', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0))
+		dev_Xs, dev_Y = spdr.get_data(dev_raw_data, method='jointee', ret_field='all', dataset='dev', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), window_size=kwargs.setdefault('window_size', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0))
+		test_Xs, test_rawdata = spdr.get_data(test_raw_data, method='jointee', ret_field='all', dataset='test', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), window_size=kwargs.setdefault('window_size', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0))
+		print 'Training Set: X: %s, Y: %s' % (', '.join([str(x.shape) for x in train_Xs]), ', '.join([str(y.shape) for y in train_Y]))
+		print 'Development Set: X: %s, Y: %s' % (', '.join([str(x.shape) for x in dev_Xs]), ', '.join([str(y.shape) for y in dev_Y]))
+		print 'Testing Set: X: %s' % ', '.join([str(x.shape) for x in test_Xs])
+		
+		
+def gen_data_cbow():
+	if (opts.local):
+		train_Xs, train_Y = spdr.get_data(None, method='cbow', from_file=True, dataset='train', source=opts.year, task=opts.task)
+		dev_Xs, dev_Y = spdr.get_data(None, method='cbow', from_file=True, dataset='dev', source=opts.year, task=opts.task)
+		test_Xs = spdr.get_data(None, method='cbow', from_file=True, dataset='test', source=opts.year, task=opts.task)
+	else:
+		train_docids, dev_docids, test_docids = spdr.get_docid(dataset='train', source=opts.year, task=opts.task), spdr.get_docid(dataset='dev', source=opts.year, task=opts.task), spdr.get_docid(dataset='test', source=opts.year, task=opts.task)
+		train_raw_data = {
+			'docids':train_docids,
+			'corpus':spdr.get_corpus(train_docids, dataset='train', source=opts.year, task=opts.task),
+			'preprcs':spdr.get_preprcs(train_docids, dataset='train', source=opts.year, task=opts.task, method=opts.parser, disable=['parse'] if opts.year==2011 else []),
+			'evnts':spdr.get_evnts(train_docids, dataset='train', source=opts.year, task=opts.task)
+		}
+		stat_dataset(train_raw_data, 'train')
+		dev_raw_data = {
+			'docids':dev_docids,
+			'corpus':spdr.get_corpus(dev_docids, dataset='dev', source=opts.year, task=opts.task),
+			'preprcs':spdr.get_preprcs(dev_docids, dataset='dev', source=opts.year, task=opts.task, method=opts.parser, disable=['parse'] if opts.year==2011 else []),
+			'evnts':spdr.get_evnts(dev_docids, dataset='dev', source=opts.year, task=opts.task)
+		}
+		stat_dataset(dev_raw_data, 'dev')
+		test_raw_data = {
+			'docids':test_docids,
+			'corpus':spdr.get_corpus(test_docids, dataset='test', source=opts.year, task=opts.task),
+			'preprcs':spdr.get_preprcs(test_docids, dataset='test', source=opts.year, task=opts.task, method=opts.parser, disable=['parse'] if opts.year==2011 else []),
+			'evnts':[[]] * len(test_docids)
+		}
+		stat_dataset(test_raw_data, 'test')
+		kwargs = {} if opts.cfg is None else ast.literal_eval(opts.cfg)
+		train_Xs, train_Y = spdr.get_data(train_raw_data, method='cbow', ret_field='all', dataset='train', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), cw2v_path=kwargs.setdefault('cncptvec', None), window_size=kwargs.setdefault('wsize', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0), concept_embed=opts.concept)
+		dev_Xs, dev_Y = spdr.get_data(dev_raw_data, method='cbow', ret_field='all', dataset='dev', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), cw2v_path=kwargs.setdefault('cncptvec', None), window_size=kwargs.setdefault('wsize', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0), concept_embed=opts.concept)
+		test_Xs, test_rawdata = spdr.get_data(test_raw_data, method='cbow', ret_field='all', dataset='test', source=opts.year, task=opts.task, fmt=opts.fmt, spfmt=opts.spfmt, w2v_path=kwargs.setdefault('wordvec', None), cw2v_path=kwargs.setdefault('cncptvec', None), window_size=kwargs.setdefault('wsize', 10), maxlen=kwargs.setdefault('maxlen', None), npg_ratio=kwargs.setdefault('npg_ratio', 1.0), concept_embed=opts.concept)
 		print 'Training Set: X: %s, Y: %s' % (', '.join([str(x.shape) for x in train_Xs]), ', '.join([str(y.shape) for y in train_Y]))
 		print 'Development Set: X: %s, Y: %s' % (', '.join([str(x.shape) for x in dev_Xs]), ', '.join([str(y.shape) for y in dev_Y]))
 		print 'Testing Set: X: %s' % ', '.join([str(x.shape) for x in test_Xs])
@@ -179,6 +228,8 @@ if __name__ == '__main__':
 	op.add_option('-a', '--mindf', default='1', type='str', dest='mindf', help='lower document frequency threshold for term ignorance')
 	op.add_option('-b', '--maxdf', default='1.0', type='str', dest='maxdf', help='upper document frequency threshold for term ignorance')
 	op.add_option('-e', '--scheme', default='cbow', type='str', dest='scheme', help='the scheme to generate data')
+	op.add_option('-w', '--wsize', default=10, action='store', type='int', dest='wsize', help='indicate the window size for bi-directional word stream extraction')
+	op.add_option('--concept', default=False, action='store_true', dest='concept', help='indicate whether use concept embedding')
 	op.add_option('-i', '--input', default='bnlpst', help='input source: bnlpst or pbmd [default: %default]')
 	op.add_option('-r', '--parser', default='spacy', help='the year when the data is released: spacy, stanford or bllip [default: %default]')
 	op.add_option('-y', '--year', default='2016', help='the year when the data is released: 2016 or 2011 [default: %default]')
@@ -202,6 +253,6 @@ if __name__ == '__main__':
 		if (len(w2v_cfg) > 0 and w2v_cfg['DATA_PATH'] is not None and w2v_cfg['W2V_MODEL'] is not None and os.path.exists(os.path.join(w2v_cfg['DATA_PATH'], w2v_cfg['W2V_MODEL']))):
 			w2v.DATA_PATH = w2v_cfg['DATA_PATH']
 			w2v.W2V_MODEL = w2v_cfg['W2V_MODEL']
-		
+
 
 	main()
