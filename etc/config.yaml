@@ -24,7 +24,7 @@ bionlp.util.plot:
 - function: common
   params:
     save_obj: False
-    save_npz: False
+    save_npz: True
 
 bionlp.txtclf:
 - function: classification
@@ -43,22 +43,46 @@ bionlp.txtclf:
     save_subfeatw_npz: False
     plot_featw: False
     plot_subfeatw: False
+- function: evaluate
+  params:
+    npg_ratio:
+    save_pred: False
+    save_tpred: True
+    save_perf: True
+    save_perf_npz: False
+    save_povl: True
+    save_povl_npz: False
+    save_spmnr: True
+    save_spmnr_npz: False
+    save_spmnr_pval: True
+    save_spmnr_pval_npz: False
+    save_featw: False
+    save_featw_npz: False
+    save_subfeatw: False
+    save_subfeatw_npz: False
+    save_auc: True
+    plot_featw: False
+    plot_subfeatw: False
+    plot_roc: True
+    plot_prc: True
+    plot_metric: False
 - function: cross_validate
   params:
     to_hdf: True
     hdf5_fpath:
     npg_ratio:
+    save_tpred: True
     save_crsval_idx: False
     save_crsval_pred: False
     save_perf_avg: True
     save_perf_avg_npz: False
-    save_perf_std: False
+    save_perf_std: True
     save_perf_std_npz: False
     save_povl: True
     save_povl_npz: False
     save_spmnr_avg: True
     save_spmnr_avg_npz: False
-    save_spmnr_pval: False
+    save_spmnr_pval: True
     save_spmnr_pval_npz: False
     save_featw: False
     save_featw_npz: False
