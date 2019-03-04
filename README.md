@@ -1,6 +1,6 @@
-# Biological Event Extractor
+# Biomedical Event Extractor
 
-`EvntExtrc` is a biological event extractor on biomedical literature. It can be used to evaluate the performance of different methods on various event detection tasks. The tool firstly transforms the unstructured textual data into numerical or binary feature matrix which is further used for cross-validation or prediction. The tool has implemented a general interface for feature construction and prediction post-processing from different datasets. The recommended model `VecEntNet` uses bi-directional LSTM to model the context of arguments in each event. The argument embeddings are then used to train the directed event detection model `VeComNet`. The trained models can be adopted for predictions of biomedical events from the text with [Entity annotation](http://2011.bionlp-st.org/home/file-formats#TOC-Entity-annotation-files-.a1-). It can generate the corresponding files with [Event annotation](http://2011.bionlp-st.org/home/file-formats#TOC-Event-annotation-files-.a2-). It also provides several utility functions to manipulate the dataset and post-process the results.
+`EvntExtrc` is an event extractor on biomedical literature. It can be used to extract biomedical events in text and evaluate the performance of different methods on various event detection tasks. The tool firstly transforms the unstructured textual data into numerical or binary feature matrix which is further used for cross-validation or prediction. The tool has implemented a general interface for feature construction and prediction post-processing from different datasets. The recommended model `VecEntNet` uses bi-directional LSTM to model the context of arguments in each event. The argument embeddings are then used to train the directed event detection model `VeComNet`. The trained models can be adopted for predictions of biomedical events from the text with [Entity annotation](http://2011.bionlp-st.org/home/file-formats#TOC-Entity-annotation-files-.a1-). It can generate the corresponding files with [Event annotation](http://2011.bionlp-st.org/home/file-formats#TOC-Event-annotation-files-.a2-). It also provides several utility functions to manipulate the dataset and post-process the results.
 
 ## Getting Started
 
@@ -92,6 +92,7 @@ dev_stat_oprnd_annot.pkl | Argument statistics for each event type in the develo
 pred_on_dev.zip | Prediction files with event annotation
 
 HDF5 Key in `dataset.h5` | Description
+--- | ---
 cbow/[train\|dev\|test]_X[0-3] | Bi-directional word embedding ID streams constructed for the two arguments in each event
 cbow/[train\|dev\|test]_ent_X[0-1] | Bi-directional word embedding ID streams constructed for the arguments
 cbow/[train\|dev]_argvec[0-K]_X[0-1] | Bi-directional argument embedding for the arguments 0 to K
