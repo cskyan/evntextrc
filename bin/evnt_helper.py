@@ -73,7 +73,19 @@ def gen_wordvec():
 	w2v.pubmed_w2v_solr('http://localhost:8983/solr/pubmed', cache_path=opts.cache, n_jobs=opts.np, **kwargs)
 	
 	
-def _contex2vec(mdl_path, fpath, X_paths):
+def _split_ents_evnts(ent_idx, evnt_idx, ent_split_key, evnt_split_key, n_splits=3):
+    from sklearn.model_selection import GroupKFold
+    evnt_grps = map(evnt_split_key, evnt_idx)
+    ent_map = dict([(key, grp.tolist()) for key, grp in pd.Series(range(len(ent_idx)), index=ent_idx).groupby(ent_split_key)])
+    group_kfold = GroupKFold(n_splits=n_splits)
+    for train_index, test_index in group_kfold.split(X=evnt_idx, groups=evnt_grps):
+        train_evnts, test_evnts = [evnt_idx[i] for i in train_index], [evnt_idx[i] for i in test_index]
+        train_keys, test_keys = list(set([evnt_grps[i] for i in train_index])), list(set([evnt_grps[i] for i in test_index]))
+        train_ents, test_ents = [ent_idx[i] for i in func.flatten_list([ent_map[k] for k in test_keys])], [ent_idx[i] for i in func.flatten_list([ent_map[k] for k in test_keys])]
+        yield [train_ents, train_evnts], [test_ents, test_evnts]
+
+
+def _contex2vec(mdl_path, fpath, X_paths, cntxvec_fpath=None, crsdev=False):
 	from keras.layers import Input, concatenate
 	from keras.models import Model
 	import keras.backend as K
@@ -85,21 +97,23 @@ def _contex2vec(mdl_path, fpath, X_paths):
 
 	custom_objects = {}
 	custom_objects = func.update_dict(func.update_dict(custom_objects, kerasext.CUSTOM_METRIC), vecomnet.CUSTOM_LOSS)
-	clf.load(os.path.splitext(mdl_path)[0], custom_objects=custom_objects)
+	clf.load(os.path.splitext(mdl_path)[0], custom_objects=custom_objects, sep_arch=crsdev)
 	output = clf.model.get_layer(name='MLP-L1').output
 	new_mdl = Model(clf.model.input, output)
-	print new_mdl.summary()
+	# print new_mdl.summary()
 	embeddings = [new_mdl.predict(Xs[i:i+2]) for i in range(0, len(Xs), 2)]
-	print [ebd.shape for ebd in embeddings]
+	# print [ebd.shape for ebd in embeddings]
 	embed_dfs = [pd.DataFrame(embed, index=Xs[0].index) for embed in embeddings]
-	_ = [df.to_hdf(fpath, '%sargvec%i_X%i' % (X_paths[0].split('X')[0], mdl_idx, i), format='table') for i, df in enumerate(embed_dfs)]
+	# Store the argument embeddings for each event sample with the format: #DATASET_argvec#ARGGLOBALID_X#ARGLOCALID
+	cntxvec_fpath = cntxvec_fpath if cntxvec_fpath else X_paths[0].split('X')[0]
+	_ = [df.to_hdf(fpath, '%sargvec%i_X%i' % (cntxvec_fpath, mdl_idx, i), format='table') for i, df in enumerate(embed_dfs)]
 	# _ = [io.write_df(df, os.path.join(os.path.dirname(fpath), 'argvec%i_X%i' % (mdl_idx, i)), with_idx=True, compress=True) for i, df in enumerate(embed_dfs)]
 	del clf, new_mdl
 
 def contex2vec():
 	kwargs = {} if opts.cfg is None else ast.literal_eval(opts.cfg)
 	mdl_path, X_paths = kwargs['mdl'], kwargs['X'].split(SC)
-	_contex2vec(mdl_path, opts.loc, X_paths)
+	_contex2vec(mdl_path, opts.loc, X_paths, crsdev=opts.crsdev)
 
 
 def combine_mdls():
@@ -245,6 +259,8 @@ if __name__ == '__main__':
 	op.add_option('-d', '--dend', dest='dend', help='deep learning backend: tf or th')
 	op.add_option('-g', '--gpunum', default=0, action='store', type='int', dest='gpunum', help='indicate the gpu device number')
 	op.add_option('-q', '--gpuq', dest='gpuq', help='prefered gpu device queue')
+	op.add_option('--gpumem', default=0.4826445576329565, action='store', type='float', dest='gpumem', help='indicate the per process gpu memory fraction')
+	op.add_option('--crsdev', action='store_true', dest='crsdev', default=False, help='whether to use heterogeneous devices')
 	op.add_option('-i', '--input', default='bnlpst', help='input source: bnlpst or pbmd [default: %default]')
 	op.add_option('-y', '--year', default='2016', help='the year when the data is released: 2016 or 2011 [default: %default]')
 	op.add_option('-u', '--task', default='bb', help='the year when the data is released: 2016 or 2011 [default: %default]')
