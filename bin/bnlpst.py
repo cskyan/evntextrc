@@ -39,6 +39,7 @@ EVNT_ARG_TYPE = {'2016':{'Lives_In':['Bacteria', 'Location']}, '2013':{'Localiza
 ft_offset = {'train':[], 'dev':[], 'test':[]}
 dist_mts = {}
 prdcss = {}
+dpnd_classmap = {}
 
 
 # Get the annotations, segmentations, and the dependcies from a1 file
@@ -65,6 +66,7 @@ def get_a1(fpath, source='2016', task='bb', method='spacy', disable=[]):
 	
 	
 def get_a1_2016(fpath, method='spacy', disable=[]):
+	global dpnd_classmap
 	try:
 		title, [text, sent_bndry, gddfs, coref] = '', [[] for i in range(4)]
 		annots = {'id':[], 'type':[], 'loc':[], 'str':[], 'tkns':[]}	# Biological term annotation, a.k.a. named entity
@@ -103,13 +105,13 @@ def get_a1_2016(fpath, method='spacy', disable=[]):
 	# Replace the tokens that have character '.' to avoid incorrect sentence separation
 	for old_text, new_text in [(' %c.' % x, ' %cx' % x) for x in string.ascii_uppercase] + [(' gen.', ' genx'), (' Lb.', ' Lbx'), (' nov.', ' novx'), (' sp.', ' spx')]:
 		content = content.replace(old_text, new_text)
-	tokens, gddfs, coref = nlp.parse_all(content, method=method, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')), disable=['tag', 'entity'])
+	tokens, gddfs, coref = nlp.parse_all(content, method=method, dpnd_classmap=dpnd_classmap, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')), disable=['tag', 'entity'])
 	sent_bndry = np.cumsum([0] + [len(sent) for sent in tokens])
 	for token_list in tokens:
 		# words['str'].extend([token['str'] for token in token_list])
 		parsed_words = [content[token['loc'][0]:token['loc'][1]] for token in token_list]
 		words_res = nlp.del_punct(parsed_words, ret_idx=True)
-		if (len(words_res) > 0): continue
+		if (len(words_res[0]) == 0): continue
 		words_wop, wop_idx = words_res
 		words['str'].extend(words_wop)
 		words['loc'].extend([token_list[i]['loc'] for i in wop_idx])
@@ -155,13 +157,13 @@ def get_a1_2013(fpath, method='spacy', disable=[]):
 	# Replace the tokens that have character '.' to avoid incorrect sentence separation
 	for old_text, new_text in [(' %c.' % x, ' %cx' % x) for x in string.ascii_uppercase] + [(' gen.', ' genx'), (' Lb.', ' Lbx'), (' nov.', ' novx'), (' sp.', ' spx')]:
 		content = content.replace(old_text, new_text)
-	tokens, gddfs, coref = nlp.parse_all(content, method=method, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')), disable=['tag', 'entity'])
+	tokens, gddfs, coref = nlp.parse_all(content, method=method, dpnd_classmap=dpnd_classmap, cached_id=os.path.splitext(os.path.basename(fpath))[0], cache_path=os.path.abspath(os.path.join(fpath, os.path.pardir, '.parsed')), disable=['tag', 'entity'])
 	sent_bndry = np.cumsum([0] + [len(sent) for sent in tokens])
 	for token_list in tokens:
 		# words['str'].extend([token['str'] for token in token_list])
 		parsed_words = [content[token['loc'][0]:token['loc'][1]] for token in token_list]
 		words_res = nlp.del_punct(parsed_words, ret_idx=True)
-		if (len(words_res) == 0): continue
+		if (len(words_res[0]) == 0): continue
 		words_wop, wop_idx = words_res
 		words['str'].extend(words_wop)
 		words['loc'].extend([token_list[i]['loc'] for i in wop_idx])
@@ -262,7 +264,7 @@ def get_a1_2011(fpath, method='spacy', disable=[]):
 			
 	# Grammatical dependency matrix
 	if ('dependency' not in disable):
-		gdmt = nlp.dpnd_trnsfm(dpnd_mt, (len(words['str']), len(words['str'])))
+		gdmt = nlp.dpnd_trnsfm(dpnd_mt, (len(words['str']), len(words['str'])), encoding='categorical', class_lbmap=dpnd_classmap)
 		gddfs = [pd.DataFrame(gdmt.tocsr().todense())]
 	return sent_bndry, words, annots, gddfs, coref
 
@@ -402,7 +404,7 @@ def _find_trg(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_t
 	r_pos = re.compile(r'\b^'+r'$\b|\b^'.join(POS_WEIGHT[pos_type].keys())+r'$\b', flags=re.I | re.X)
 	trg_wds = get_trgwd(os.path.join(os.path.join(DATA_PATH, source, task, 'trigger'), 'TRIGGERWORDS.txt'))
 	r_patn = re.compile(r'\b^'+r'$\b|\b^'.join(trg_wds)+r'$\b', flags=re.I | re.X)
-	trg_evntoprt = {'2016':['None'],'2011':['Action']}
+	trg_evntoprt = {'2016':['None'], '2013':['None'],'2011':['Action']}
 	r_evntoprt = re.compile(r'(?=('+'|'.join(trg_evntoprt[source])+r'))', flags=re.I | re.X)
 	trigger, prdc = None, wid2
 	if (r_pos.match(words['pos'][wid1]) or r_evntoprt.findall(','.join(words['evnt_annotp'][wid1])) or r_patn.findall(words['str'][wid1]) or r_patn.findall(words['stem'][wid1]) or r_pos.match(words['stem_pos'][wid1])):
@@ -809,12 +811,97 @@ def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task=
 
 		return word_df, trg_lb, edge_df, edge_lb
 		
+		
+def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', window_size=10, maxlen=None, npg_ratio=1.0):
+	global dpnd_classmap
+	import xarray as xr
+	from keras.utils import to_categorical
+	w2v_wrapper = w2v.GensimW2VWrapper(w2v_path)
+	last_widx = w2v_wrapper.get_vocab_size() - 1
+	## Feature columns
+	evnt_index, data, label, entity_label = [[] for i in range(4)]
+	stat_oprnd_annot = {}
+	## Extract features from raw data
+	for docid, corpus, preprcs, events in itertools.izip(raw_data['docids'], raw_data['corpus'], raw_data['preprcs'], raw_data['evnts']):
+		sent_bndry, words, annots, depends, coref = preprcs
+		word_num, event_num = len(words['str']), len(events['id']) if dataset != 'test' else 0
+		words['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in words['str']]
+		annots['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in annots['str']]
+		annots['type_embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in annots['type']]
+		words['entype_embedding_id'] = [annots['type_embedding_id'][aid] for aid in words['annot_id']]
+		data.append((words['embedding_id'], words['entype_embedding_id'], annots['embedding_id'], depends))
+	word_vec_ids, ent_type_ids, ent_ids, depends_list = zip(*data)
+	
+	## Feature Construction
+	from keras.preprocessing import sequence
+	embedid_seqs = [sequence.pad_sequences(x, maxlen=maxlen, dtype='int64', padding='pre', truncating='pre', value=last_widx) for x in [word_vec_ids, ent_type_ids, ent_ids]]
+	depend_vecs_list = []
+	for depends in depends_list: # Do it after parsing all the documents to gain the completed set of dependcy classes
+		dpnd_vecs = []
+		for i, dpnd in enumerate(depends):
+			dpnd_vecs.extend([label_binarize(x, classes=dpnd_classmap.values()).sum(axis=0) for j, x in dpnd.iterrows()])
+		depend_vecs_list.append(np.vstack(dpnd_vecs))
+	max_word_num = max([dpndvec.shape[0] for dpndvec in depend_vecs_list])
+	depend_vecs = np.vstack([dpndvec if dpndvec.shape[0] == max_word_num else np.vstack([dpndvec, np.zeros((max_word_num - dpndvec.shape[0], dpndvec.shape[1]))]) for dpndvec in depend_vecs_list])
+	data = [word_vec_ids, ent_type_ids, ent_ids, depend_vecs]
+
+	feat_dfs = [pd.DataFrame(mt, index=raw_data['docids'], columns=['word_%i'%i for i in range(mt.shape[1])], dtype='int64') for mt in data[:2]]
+	feat_dfs.append(pd.DataFrame(data[2], index=raw_data['docids'], columns=['entity_%i'%i for i in range(mt.shape[1])], dtype='int64'))
+	feat_dfs.append(xr.DataArray(data[3], coords=[raw_data['docids'], ['word_%i' % i for i in range(max_word_num)], dpnd_classmap.values()], dims=['doc', 'word', 'dpnd_type']))
+	
+	for df_name, df in zip(['word_vectors', 'entity_types', 'entities'], feat_dfs[:3]):
+		if (fmt == 'npz'):
+			io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_%s.npz' % (dataset, df_name)), sparse_fmt=None, compress=True)
+		elif (fmt == 'h5'):
+			df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'jointee/%s_%s' % (dataset, df_name), format='table', data_columns=True)
+		else:
+			df.to_csv(os.path.join(DATA_PATH, source, task, '%s_%s.csv' % (dataset, df_name)), encoding='utf8')
+	
+	df_name = 'depends_vectors'
+	if (fmt == 'npz'):
+		io.write_spdf(df, os.path.join(DATA_PATH, source, task, '%s_%s.npz' % (dataset, df_name)), with_col=True, with_idx=True, sparse_fmt=None, compress=True)
+	elif (fmt == 'h5'):
+		df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'jointee/%s_%s' % (dataset, df_name), format='table', data_columns=True)
+	else:
+		df.to_csv(os.path.join(DATA_PATH, source, task, '%s_%s.csv' % (dataset, df_name)), encoding='utf8')
+
+	if (dataset == 'test'):
+		# Save intermediate data
+		raw_data['word_offset'] = ft_offset[dataset]
+		raw_data['dist_mts'] = dist_mt_list
+		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+		return feat_dfs, raw_data
+	else:
+		# Construct trigger label
+		trg_label = label_binarize(ft_trigger, classes=evnt_lb if len(evnt_lb) > 1 else ['']+evnt_lb)
+		# Construct trigger-argument pair sample matrix
+		edge_data = np.array(edges)
+		edge_mt = np.hstack((word_mt[edge_data[:,0].astype(int),:], word_mt[edge_data[:,1].astype(int),:]))
+		em_cols = ['lf_%s' % col for col in wm_cols] + ['rt_%s' % col for col in wm_cols]
+		# Combine all the data into Pandas DataFrame
+		trg_lb = pd.DataFrame(trg_label, columns=evnt_lb)
+		edge_df = pd.DataFrame(edge_mt, columns=em_cols)
+		edge_lb_mt = label_binarize(ft_edgelb, classes=evnt_lb if len(evnt_lb) > 1 else ['']+evnt_lb)
+		edge_lb = pd.DataFrame(edge_lb_mt, columns=evnt_lb)
+		
+		if (fmt == 'npz'):
+			io.write_df(trg_lb, os.path.join(DATA_PATH, source, task, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_df, os.path.join(DATA_PATH, source, task, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_lb, os.path.join(DATA_PATH, source, task, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+		else:
+			trg_lb.to_csv(os.path.join(DATA_PATH, source, task, '%swY.csv'%dataset), encoding='utf8')
+			edge_df.to_csv(os.path.join(DATA_PATH, source, task, '%seX.csv'%dataset), encoding='utf8')
+			edge_lb.to_csv(os.path.join(DATA_PATH, source, task, '%seY.csv'%dataset), encoding='utf8')
+
+		return word_df, trg_lb, edge_df, edge_lb
+
+
 ## End Trigger-based Approach ##
   
 
 ## Start Non-Trigger Approach ##
 
-def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', window_size=10, maxlen=None, npg_ratio=1.0):
+def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, prefix='cbow', dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', cw2v_path=None, window_size=10, include_target=True, maxlen=None, npg_ratio=1.0, concept_embed=False):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -825,10 +912,9 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			elif (ret_field == 'entity'):
 				file_name = (['%s_ent_X%i.%s' % (dataset, i, fmt) for i in range(2)], '%s_ent_Y.%s' % (dataset, fmt))
 			if (fmt == 'h5'):
-				x_fname = ['cbow/%s' % os.path.splitext(xfn)[0] for xfn in file_name[0]]
-				y_fname = 'cbow/%s' % os.path.splitext(file_name[1])[0] if (type(file_name[1]) != list) else ['cbow/%s' % os.path.splitext(yfn)[0] for yfn in file_name[1]]
+				x_fname = ['%s/%s' % (prefix, os.path.splitext(xfn)[0]) for xfn in file_name[0]]
+				y_fname = '%s/%s' % (prefix, os.path.splitext(file_name[1])[0]) if (type(file_name[1]) != list) else ['%s/%s' % (prefix, os.path.splitext(yfn)[0]) for yfn in file_name[1]]
 				file_name = x_fname, y_fname, 'dataset.h5'
-			# file_name = (['%s_X%i.%s' % (dataset, i, fmt) for i in range(4)], '%s_Y.%s' % (dataset, fmt)) if (fmt != 'h5') else (['cbow/%s_X%i' % (dataset, i) for i in range(4)], 'cbow/%s_Y' % dataset, 'dataset.h5')
 		else:
 			file_name = from_file
 		if (dataset == 'test'):
@@ -848,6 +934,9 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			return [pd.read_csv(os.path.join(DATA_PATH, source, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[1]), index_col=0, encoding='utf8') if (type(file_name[1]) != list) else [pd.read_csv(os.path.join(DATA_PATH, source, task, y), index_col=0, encoding='utf8') for y in file_name[1]]
 	from bionlp.model import vecomnet
 	w2v_wrapper = w2v.GensimW2VWrapper(w2v_path)
+	if (cw2v_path is not None and os.path.exists(cw2v_path)):
+		print 'Using alternative concept embedding model!'
+		cw2v_wrapper = w2v.GensimW2VWrapper(cw2v_path)
 	last_widx = w2v_wrapper.get_vocab_size() - 1
 	## Feature columns
 	evnt_index, cbow, annot_cbow, direction, label, entity_label = [[] for i in range(6)]
@@ -857,7 +946,46 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 		sent_bndry, words, annots, depends, coref = preprcs
 		word_num, event_num = len(words['str']), len(events['id']) if dataset != 'test' else 0
 		words['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in words['str']]
-		annots['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in annots['type']]
+		## Obtain the concept embedding
+		if (concept_embed): # entity concept
+			from bionlp.spider import pubtator, xmlextrc
+			concepts, pubtator_cli = [], pubtator.PubTatorAPI()
+			# Retrieve the concept annotations
+			res = pubtator_cli.get_concepts_pmid('all', [x for x in docid.split('-') if x.isdigit()][0], fmt='BioC')
+			prgrphs = xmlextrc.extrc_list('document', 'passage', '.', xml_str=res, ret_type='elem')
+			doc_text = '\n'.join([prgrph.find('text').text for prgrph in prgrphs if prgrph.find('text')])
+			for annot in func.flatten_list([xmlextrc.extrc_list('passage', 'annotation', '.', xml_tree=prgrph, ret_type='elem') for prgrph in prgrphs]):
+				data = {}
+				for elem in annot:
+					if elem.tag == 'infon': data[elem.attrib['key']] = elem.text
+					if elem.tag == 'location': data['loc'] = (int(elem.attrib['offset']), int(elem.attrib['offset']) + int(elem.attrib['length']))
+					if elem.tag == 'text': data['str'] = elem.text
+				concepts.append((data['str'], '%s_%s' % (data['type'], data['identifier'].replace(':', '_') if data.has_key('identifier') else data['str']), data['loc']))
+			# Map the concepts to the dataset
+			offset, cncpt_offset, annots['embedding_id'] = doc_text.find(corpus[:-2]), 0, []
+			for alocs, astr, atype in zip(annots['loc'], annots['str'], annots['type']):
+				overlap = 0
+				for loc in offset + np.array(alocs):
+					cncpt_unmatch = True
+					while cncpt_unmatch and cncpt_offset < len(concepts):
+						if (loc[0] > concepts[cncpt_offset][2][1]):
+							cncpt_offset += 1
+							continue
+						else:
+							if (loc[1] < concepts[cncpt_offset][2][0]): break
+							overlap += min(loc[1], concepts[cncpt_offset][2][1]) - max(loc[0], concepts[cncpt_offset][2][0])
+							cncpt_unmatch = False
+				if (1.0 * overlap / len(astr)) > 0.5:
+					print 'Found concept: %s in the annotated entity %s!' % (concepts[cncpt_offset][0], astr)
+					if (cw2v_path is not None and os.path.exists(cw2v_path)):
+						annots['embedding_id'].append(cw2v_wrapper.word2idx(concepts[cncpt_offset][1], inexistence=last_widx))
+					else:
+						annots['embedding_id'].append(w2v_wrapper.word2idx(concepts[cncpt_offset][1], inexistence=last_widx))
+				else:
+					annots['embedding_id'].append(w2v_wrapper.word2idx(atype, inexistence=last_widx))
+		else:
+			annots['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in annots['type']] # entity type
+			# annots['embedding_id'] = [last_widx for x in range(len(annots['str']))]
 		## Construct pairs of entities, format: <sub_aid, obj_aid>:[(sub_aindex, obj_aindex), directions, labels, (sub_label, obj_label)]
 		entity_pairs = OrderedDict([((annots['id'][e_sub], annots['id'][e_obj]), [(e_sub, e_obj), [], [], []]) for e_sub, e_obj in itertools.permutations(range(len(annots['id'])), 2)])
 		ok_samples = []
@@ -890,7 +1018,7 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 					print 'The event cross sentences: %s' % str((sent_idx_pair[0], sent_idx_pair[1]))
 					words0 = words['str'][sent_bndry[sent_idx_pair[0]]:sent_bndry[sent_idx_pair[0] + 1]] if sent_idx_pair[0] + 1 < len(sent_bndry) else words['str'][sent_bndry[-1]:]
 					words1 = words['str'][sent_bndry[sent_idx_pair[1]]:sent_bndry[sent_idx_pair[1] + 1]] if sent_idx_pair[1] + 1 < len(sent_bndry) else words['str'][sent_bndry[-1]:]
-					print '[%s] ' % annots['str'][idx_pair[0]] + ' '.join(words0) + '\n' + '[%s] ' % annots['str'][idx_pair[1]] + ' '.join(words1)
+					print ('[%s] ' % annots['str'][idx_pair[0]] + ' '.join(words0) + '\n' + '[%s] ' % annots['str'][idx_pair[1]] + ' '.join(words1)).encode('utf-8').strip()
 		ng_all_samples = [k for k, v in entity_pairs.iteritems() if len(v[1]) == 0]
 		ng_allsamp_num = len(ng_all_samples)
 		if (dataset == 'test'):
@@ -908,11 +1036,12 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			# np.random.shuffle(samp_idx)
 		for i in samp_idx:
 			e_sub, e_obj = entity_pairs[output_samples[i]][0]
-			cbow_list = vecomnet.get_cbow_context(words['embedding_id'], [annots['tkns'][e_sub], annots['tkns'][e_obj]], window_size=window_size, include_target=True)
-			# annot_cbow_list = vecomnet.get_cbow_context(annots['embedding_id'], [e_sub, e_obj], window_size=window_size/2, include_target=True)
+			cbow_list = vecomnet.get_cbow_context(words['embedding_id'], [annots['tkns'][e_sub], annots['tkns'][e_obj]], window_size=window_size, include_target=include_target)
+			# annot_cbow_list = vecomnet.get_cbow_context(annots['embedding_id'], [e_sub, e_obj], window_size=window_size/2, include_target=include_target)
 			cbow_list = cbow_list[0] + cbow_list[1]
-			for cl, annot_eid in zip(cbow_list, [annots['embedding_id'][e_sub]] * 2 + [annots['embedding_id'][e_obj]] * 2):
-				cl.append(annot_eid)
+			if (concept_embed):
+				for cl, annot_eid in zip(cbow_list, [annots['embedding_id'][e_sub]] * 2 + [annots['embedding_id'][e_obj]] * 2):
+					cl.append(annot_eid)
 			# annot_cbow_list = annot_cbow_list[0] + annot_cbow_list[1]
 			evnt_index.append('|'.join((docid, output_samples[i][0], output_samples[i][1])))
 			cbow.append(cbow_list)
@@ -929,9 +1058,9 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 		if (fmt == 'npz'):
 			io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
 		elif (fmt == 'h5'):
-			df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_X%i' % (dataset, i), format='table', data_columns=True)
+			df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_X%i' % (prefix, dataset, i), format='table', data_columns=True)
 		else:
-			df.to_csv(os.path.join(DATA_PATH, source, task, '%s_X%i.npz' % (dataset, i)), encoding='utf8')
+			df.to_csv(os.path.join(DATA_PATH, source, task, '%s_X%i.csv' % (dataset, i)), encoding='utf8')
 	# Obtain the entity indices
 	lent_index = ['|'.join(idx.split('|')[:2]) for idx in evnt_index]
 	lent_feat_dfs = [x.set_index([lent_index]).reset_index().drop_duplicates(subset='index').set_index('index') for x in feat_dfs[:2]]
@@ -984,11 +1113,11 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			# io.write_df(ent_df, os.path.join(DATA_PATH, source, task, '%s_pseudo_X.npz' % dataset), sparse_fmt=None, compress=True)
 			_ = [io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_pseudo_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_dfs)]
 		elif (fmt == 'h5'):
-			label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_Y' % dataset, format='table', data_columns=True)
-			ent_label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_ent_Y' % dataset, format='table', data_columns=True)
-			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_ent_X%i' % (dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_feat_dfs)]
-			# ent_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_pseudo_X' % dataset, format='table', data_columns=True)
-			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_pseudo_X%i' % (dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_dfs)]
+			label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_Y' % (prefix, dataset), format='table', data_columns=True)
+			ent_label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_ent_Y' % (prefix, dataset), format='table', data_columns=True)
+			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_ent_X%i' % (prefix, dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_feat_dfs)]
+			# ent_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_pseudo_X' % (prefix, dataset), format='table', data_columns=True)
+			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_pseudo_X%i' % (prefix, dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_dfs)]
 		else:
 			label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_Y.csv' % dataset), encoding='utf8')
 			ent_label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_Y.csv' % dataset), encoding='utf8')
@@ -1004,7 +1133,7 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			if (fmt == 'npz'):
 				io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
 			elif (fmt == 'h5'):
-				df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'cbow/%s_ent_X%i' % (dataset, i), format='table', data_columns=True)
+				df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_ent_X%i' % (prefix, dataset, i), format='table', data_columns=True)
 			else:
 				df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8')
 		if (ret_field == 'all'): return feat_dfs + ent_feat_dfs, raw_data
