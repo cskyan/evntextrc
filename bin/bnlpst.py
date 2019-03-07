@@ -370,7 +370,7 @@ def get_corpus(docids, dataset='train', source='2016', task='bb', ext_fmt='txt')
 	elif (dataset == 'test'):
 		dir_path = os.path.join(DATA_PATH, source, task, 'test')
 	for did in docids:
-		corpus.append(' '.join(fs.read_file(os.path.join(dir_path, did+'.%s'%ext_fmt), 'utf8')))
+		corpus.append(''.join(fs.read_file(os.path.join(dir_path, did+'.%s'%ext_fmt), 'utf8')))
 	return corpus
 	
 	
