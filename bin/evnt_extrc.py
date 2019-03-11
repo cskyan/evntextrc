@@ -9,10 +9,7 @@
 ###########################################################################
 #
 
-import os
-import sys
-import logging
-import itertools
+import os, sys, time, math, logging, itertools
 from optparse import OptionParser
 from collections import OrderedDict
 
@@ -880,21 +877,25 @@ def all_cbow(prefix='cbow', fusion=False):
 				sys.exit(-1)
 			data_prefix = cache_paths[0].split('|')
 			data_path, cntx_prefix = data_prefix[0], data_prefix[1] if len(data_prefix) > 1 else prefix
-			all_evnt_args = pd.read_hdf(data_path, key='%s/train_ent_Y' % prefix).columns.tolist()
+			fpath = os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5')
+			with pd.HDFStore(fpath, 'r') as store:
+				all_evnt_args = pd.read_hdf(store, key='%s/train_ent_Y' % prefix).columns.tolist()
 			evnt_type, lent_type, rent_type = all_train_Y.columns[0].split(':')
 			# evnt_args = spdr.EVNT_ARG_TYPE[opts.year][evnt_type]
 			evnt_args = [lent_type, rent_type]
 			evnt_arg_idx = [all_evnt_args.index(x) for x in evnt_args]
 			# Two possible direction / argument order: X0&ArgM+X0&ArgN, X1&ArgN+X1&ArgM
 			evnt_arg_idcs = [evnt_arg_idx, evnt_arg_idx[::-1]] # for [X0, X1]
-			train_argvecs = [pd.concat([pd.read_hdf(data_path, key='%s/train_argvec%i_X%i' % (cntx_prefix, arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
-			dev_argvecs = [pd.concat([pd.read_hdf(data_path, key='%s/dev_argvec%i_X%i' % (cntx_prefix, arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
+			with pd.HDFStore(data_path, 'r') as store:
+				train_argvecs = [pd.concat([pd.read_hdf(store, key='%s/train_argvec%i_X%i' % (cntx_prefix, arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
+				dev_argvecs = [pd.concat([pd.read_hdf(store, key='%s/dev_argvec%i_X%i' % (cntx_prefix, arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
 			# X0&ArgM+X1&ArgM, X0&ArgN+X1&ArgN
 			# train_argvecs = [pd.concat([pd.read_hdf(data_path, key='%s/train_argvec%i_X%i' % (cntx_prefix, arg_idx, i)) for i in range(2)], axis=1) for arg_idx in evnt_arg_idx]
 			# dev_argvecs = [pd.concat([pd.read_hdf(data_path, key='%s/dev_argvec%i_X%i' % (cntx_prefix, arg_idx, i)) for i in range(2)], axis=1) for arg_idx in evnt_arg_idx]
 			if (fusion):
 				all_train_Xs = kwargs['precomp_vec'] = [pd.concat([train_X, dev_X]) for train_X, dev_X in zip(train_argvecs, dev_argvecs)]
-				test_Xs = [pd.concat([pd.read_hdf(data_path, key='cbow/test_argvec%i_X%i' % (arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
+				with pd.HDFStore(data_path, 'r') as store:
+					test_Xs = [pd.concat([pd.read_hdf(store, key='cbow/test_argvec%i_X%i' % (arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
 			else:
 				all_train_Xs = kwargs['precomp_vec'] = train_argvecs
 				test_Xs, test_Y = dev_argvecs, dev_Y
@@ -920,7 +921,7 @@ def all_cbow(prefix='cbow', fusion=False):
 		model_iter = gen_cb_models if opts.comb else gen_bm_models
 	# all_train_Xs, all_train_Y = [x.iloc[np.random.choice(len(x), size=10000, replace=True)] for x in all_train_Xs], all_train_Y.iloc[np.random.choice(len(all_train_Y), size=10000, replace=True)]
 	model_param = dict(tuned=opts.best, glb_filtnames=FILT_NAMES, glb_clfnames=CLF_NAMES)
-	global_param = dict(signed=signed, comb=opts.comb, mdl_save_kwargs={'sep_arch':opts.crsdev}, pl_names=PL_NAMES, pl_set=PL_SET)
+	global_param = dict(signed=signed, comb=opts.comb, mdl_save_kwargs={'sep_arch':opts.crsdev, 'skip_layers':['WordEmbedding','ConceptEmbedding'], 'save_alone':[['WordEmbedding'],['ConceptEmbedding']], 'alone_noprfx':opts.alnoprfx, 'over_write':False}, pl_names=PL_NAMES, pl_set=PL_SET)
 	print 'Extra model parameters: %s %s' % (model_param, global_param)
 	
 	## Training and prediction
@@ -981,7 +982,7 @@ def entity_cbow(prefix='cbow', fusion=False):
 		model_iter = gen_cb_models if opts.comb else gen_bm_models
 	# all_train_Xs, all_train_Y = [x.iloc[np.random.choice(len(x), size=10000, replace=True)] for x in all_train_Xs], all_train_Y.iloc[np.random.choice(len(all_train_Y), size=10000, replace=True)]
 	model_param = dict(tuned=opts.best, glb_filtnames=FILT_NAMES, glb_clfnames=CLF_NAMES)
-	global_param = dict(comb=opts.comb, mdl_save_kwargs={'sep_arch':opts.crsdev}, pl_names=PL_NAMES, pl_set=PL_SET)
+	global_param = dict(comb=opts.comb, mdl_save_kwargs={'sep_arch':opts.crsdev, 'skip_layers':['WordEmbedding','ConceptEmbedding'], 'save_alone':[['WordEmbedding'],['ConceptEmbedding']], 'alone_noprfx':opts.alnoprfx, 'over_write':False}, pl_names=PL_NAMES, pl_set=PL_SET)
 	
 	## Training and prediction
 	if (opts.pred):
@@ -1123,67 +1124,158 @@ def demo():
 		train_evnt_Xs, train_evnt_Y, dev_evnt_Xs, dev_evnt_Y, test_evnt_Xs, test_evnt_rawdata = load_data(mltl=True, ret_field='event', prefix='cbow')
 		all_train_evnt_Xs, all_train_evnt_Y = ([pd.concat([train_X, dev_X]) for train_X, dev_X in zip(train_evnt_Xs, dev_evnt_Xs)], pd.concat([train_evnt_Y, dev_evnt_Y]).fillna(0).astype('int8')) if opts.fusion else (train_evnt_Xs, train_evnt_Y)
 		split_key = lambda x: '-'.join(x.split('|')[0].split('-')[:2])
-		regen(data_path, all_train_ent_Xs, all_train_ent_Y, all_train_evnt_Xs, all_train_evnt_Y, split_key, split_key, n_splits=opts.kfold)
+		# regen(data_path, all_train_ent_Xs, all_train_ent_Y, all_train_evnt_Xs, all_train_evnt_Y, split_key, split_key, n_splits=opts.kfold)
 		all_train_evnt_stat = all_train_evnt_Y.abs().sum(axis=0)
 		train_ent_evnt_map = [[(i, evnt) for i, evnt in enumerate(all_events) if ent in evnt] for ent in all_evnt_args]
+	## Parallel with fork Start ##
+	sub_pid = 9999
+	jobpp = math.ceil(1.0 * len(all_evnt_args) / opts.np)
+	os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
+	## Parallel with fork End ##
 	for i in range(len(all_evnt_args)):
 		if (opts.cache is not None and opts.cache == 'skip'): break
+		## Parallel with fork Start ##
+		jobid = i % jobpp
+		if (sub_pid != 0):
+			sub_pid = os.fork() if (jobid == 0) else -1
+		if (sub_pid != 0 or sub_pid == -1): continue
+		## Parallel with fork End ##
 		opts.pid = i
+		if (opts.regen):
+			invlv_evnt_ids, invlv_evnt = zip(*train_ent_evnt_map[i])
+			invlv_evnt = list(invlv_evnt) if len(invlv_evnt) > 1 else invlv_evnt[0]
 		for j in range(opts.kfold):
 			if (opts.regen): # Regenerate the train and dev dataset in different folder to train argument embedding
-				invlv_evnt_ids, invlv_evnt = zip(*train_ent_evnt_map[i])
-				invlv_evnt = list(invlv_evnt) if len(invlv_evnt) > 1 else invlv_evnt[0]
-				cntx_prefix = 'cbow_regen_%if/%i' % (opts.kfold, j) 
-				prefix = cntx_prefix if (len(all_train_evnt_Y.shape) == 1 or all_train_evnt_Y.shape[1] == 1) else '%s/%i' % (cntx_prefix, all_train_evnt_stat.index.get_loc(all_train_evnt_stat.loc[invlv_evnt].argmax()) if len(invlv_evnt_ids) > 1 else invlv_evnt_ids[0])
-				#prefix = 'cbow_regen_%if/%i' % (opts.kfold, j) if (len(all_train_evnt_Y.shape) == 1 or all_train_evnt_Y.shape[1] == 1) else 'cbow_regen_%if/%i/%i' % (opts.kfold, j, all_train_evnt_stat.index.get_loc(all_train_evnt_stat.loc[invlv_evnt].argmax()) if len(invlv_evnt_ids) > 1 else invlv_evnt_ids[0])
+				cntx_prefix = 'cbow_regen_%if/%i' % (opts.kfold, j)
+				prefix = cntx_prefix if (len(all_train_evnt_Y.shape) == 1 or all_train_evnt_Y.shape[1] == 1) else '%s/%i' % (cntx_prefix, all_train_evnt_stat.index.get_loc(all_train_evnt_stat.loc[invlv_evnt].argmax()) if len(invlv_evnt_ids) > 1 else invlv_evnt_ids[0]) # prefix = 'cbow_regen_%if/%i' % (opts.kfold, j) if (len(all_train_evnt_Y.shape) == 1 or all_train_evnt_Y.shape[1] == 1) else 'cbow_regen_%if/%i/%i' % (opts.kfold, j, all_train_evnt_stat.index.get_loc(all_train_evnt_stat.loc[invlv_evnt].argmax()) if len(invlv_evnt_ids) > 1 else invlv_evnt_ids[0])
 			if not (opts.cache is not None and os.path.exists(opts.cache) and os.path.exists(os.path.join(opts.cache, 'clf_pred_vecentnet_%i.npz' % i))):
 				_clear_globals()
 				entity_cbow(prefix=prefix, fusion=opts.fusion and to_pred)
 				mdl_dir = '.'
 			else:
 				mdl_dir = opts.cache
+			## Parallel with fork Start ##
+			if (opts.alnoprfx):
+				if (i == 0):
+					import h5py
+					layers = [['WordEmbedding'],['ConceptEmbedding']] if opts.cncptw2v else [['WordEmbedding']]
+					while True:
+						try:
+							for layer_names in layers:
+								layer_names = layer_names if type(layer_names) is list else [layer_names]
+								filepath = '_'.join(map(str.lower, layer_names)).replace(' ', '_').replace('-', '_') + '.h5'
+								with h5py.File(filepath, mode='r', libver='latest', swmr=True) as f:
+									pass
+							break
+						except:
+							time.sleep(5)
+					open('.barrier.fork', 'a').close()
+				else:
+					while True:
+						if os.path.isfile('.barrier.fork'):
+							break
+						else:
+							time.sleep(5)
+			## Parallel with fork End ##
 			with kerasext.gen_cntxt(opts.dend, **dict(device='/cpu:0')): # Store the argument embedding in the unified location
-				helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5'), ['%s/train_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath='%s/train_' % cntx_prefix, crsdev=opts.crsdev)
-				helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5'), ['%s/dev_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath='%s/dev_' % cntx_prefix, crsdev=opts.crsdev)
+				cntxvec_fpath='cntxvec_%i.h5' % i
+				print 'Storing argument embedding in %s' % cntxvec_fpath
+				helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), data_path, ['%s/train_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath=cntxvec_fpath, cntxvec_path='%s/train_' % cntx_prefix, crsdev=opts.crsdev, load_alone_layers=[['WordEmbedding'],['ConceptEmbedding']], alone_noprfx=opts.alnoprfx)
+				helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), data_path, ['%s/dev_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath=cntxvec_fpath, cntxvec_path='%s/dev_' % cntx_prefix, crsdev=opts.crsdev, load_alone_layers=[['WordEmbedding'],['ConceptEmbedding']], alone_noprfx=opts.alnoprfx)
 				if (opts.fusion):
-					helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5'), ['%s/test_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath='%s/test_' % cntx_prefix, crsdev=opts.crsdev)
+					helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), data_path, ['%s/test_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath=cntxvec_fpath, cntxvec_path='%s/test_' % cntx_prefix, crsdev=opts.crsdev, load_alone_layers=[['WordEmbedding'],['ConceptEmbedding']], alone_noprfx=opts.alnoprfx)
+		## Parallel with fork Start ##
+		if (i == len(all_evnt_args) - 1):
+			open('.jobdone.fork', 'a').close()
+			os._exit(0)
+		if (sub_pid == 0 and jobid == jobpp - 1): os._exit(0)
+	while True:
+		if os.path.isfile('.jobdone.fork'):
+			break
+		else:
+			time.sleep(10)
+	os.remove('.jobdone.fork')
+		## Parallel with fork End ##
+	# Combine the context embedding vectors of different arguments
+	import h5py
+	with h5py.File('cntxvec.h5', mode='w') as f:
+		for i in range(len(all_evnt_args)):
+			h5fpath = 'cntxvec_%i.h5' % i
+			if (not os.path.isfile(h5fpath)): h5fpath = os.path.abspath(os.path.join(os.path.pardir, h5fpath))
+			while True:
+				try:
+					with h5py.File(h5fpath, mode='r') as subf:
+						for j in range(opts.kfold):
+							if (opts.regen): cntx_prefix = 'cbow_regen_%if/%i' % (opts.kfold, j)
+							try:
+								fg = f.create_group(cntx_prefix)
+							except:
+								pass
+							for x in subf[cntx_prefix].keys():
+								dpath = '%s/%s' % (cntx_prefix, x)
+								subf.copy(dpath, f[cntx_prefix])
+					break
+				except Exception as e:
+					print e
+					time.sleep(5)
 
 	## Event prediction
-	# opts.pred = to_pred
-	# opts.scheme = 'cbow'
-	# orig_cache = opts.
-	# prefix = cntx_prefix = 'cbow_regen' if opts.regen else 'cbow'
-	# opts.cache = 'embed:%s|%s' % (data_path, cntx_prefix)
-	##prefix = 'cbow' if not opts.regen else ('cbow_regen' if (len(all_events) == 1) else 'cbow_regen_0')
-	# orig_wd = os.getcwd()
-	# for i in range(len(all_events)):
-		# new_wd = os.path.join(orig_wd, str(i))
-		# fs.mkdir(new_wd)
-		# os.chdir(new_wd)
-		# opts.pid = 0 if opts.regen else i
-		# sub_orig_wd = os.getcwd()
-		# for j in range(opts.kfold):
-			# new_wd = os.path.join(sub_orig_wd, str(j))
-			# fs.mkdir(new_wd)
-			# os.chdir(new_wd)
-			# _clear_globals()
-			# opts.cache = 'embed:%s|%s' % (data_path, cntx_prefix)
-			# if (opts.regen):
-				# cntx_prefix = 'cbow_regen_%if/%i' % (opts.kfold, j) 
-				# prefix = cntx_prefix if (len(all_train_evnt_Y.shape) == 1 or all_train_evnt_Y.shape[1] == 1) else '%s/%i' % (cntx_prefix, all_train_evnt_stat.index.get_loc(all_train_evnt_stat.loc[invlv_evnt].argmax()) if len(invlv_evnt_ids) > 1 else invlv_evnt_ids[0])
-			# all_cbow(prefix=prefix, fusion=opts.fusion and to_pred) # no need to fuse if regenerate train and dev
-			# os.chdir(sub_orig_wd)
-		# os.chdir(orig_wd)
-	# opts.cache = orig_cache
-	# if (to_pred):
-		# fnames = ['clf_pred_vecomnet_%i.npz' % i for i in range(len(all_events))]
-		# preds = [io.read_npz(fname)['pred_lb'] for fname in fnames]
-		# probs = [io.read_npz(fname)['pred_prob'] for fname in fnames]
-		# pred = np.column_stack(preds)
-		# prob = np.column_stack(probs)
-		# pred_fpath = 'combined_pred_%s' % fnames[0].split('pred_')[1].strip('_0')
-		# io.write_npz(dict(pred_lb=pred, pred_prob=prob), pred_fpath)
-		# helper._pred2event(spdr, True, pred_fpath, data_path, test_X_paths=['cbow/test_X%i' % i for i in range(4)] if opts.fusion else ['%s/dev_X%i' % (prefix, i) for i in range(4)], train_Y_path='cbow/train_Y', method='cbow', source=opts.year, task=opts.task)
+	opts.pred = to_pred
+	opts.scheme = 'cbow'
+	orig_cache = opts.cache
+	prefix = cntx_prefix = 'cbow_regen' if opts.regen else 'cbow'
+	opts.cache = 'embed:%s|%s' % (data_path, cntx_prefix)
+	orig_wd = os.getcwd()
+	for i in range(len(all_events)):
+		cntxvec_path = os.path.join(orig_wd, 'cntxvec.h5')
+		if (not os.path.isfile(cntxvec_path)):
+			cntxvec_path = os.path.abspath(os.path.join(orig_wd, os.pardir, 'cntxvec.h5'))
+			if (not os.path.isfile(cntxvec_path)):
+				print 'Cannot find the context embedding file %s' % cntxvec_path
+				continue
+		## Parallel with fork Start ##
+		jobid = i % jobpp
+		if (sub_pid != 0):
+			sub_pid = os.fork() if (jobid == 0) else -1
+		if (sub_pid != 0 or sub_pid == -1): continue
+		## Parallel with fork End ##
+		opts.pid = 0 if opts.regen else i
+		new_wd = os.path.join(orig_wd, str(i))
+		fs.mkdir(new_wd)
+		os.chdir(new_wd)
+		sub_orig_wd = os.getcwd()
+		for j in range(opts.kfold):
+			new_wd = os.path.join(sub_orig_wd, str(j))
+			fs.mkdir(new_wd)
+			os.chdir(new_wd)
+			_clear_globals()
+			if (opts.regen):
+				cntx_prefix = 'cbow_regen_%if/%i' % (opts.kfold, j) 
+				prefix = cntx_prefix if (len(all_events) == 1) else '%s/%i' % (cntx_prefix, i)
+			opts.cache = 'embed:%s|%s' % (cntxvec_path, cntx_prefix)
+			all_cbow(prefix=prefix, fusion=opts.fusion and to_pred) # no need to fuse if regenerate train and dev
+			os.chdir(sub_orig_wd)
+		os.chdir(orig_wd)
+		## Parallel with fork Start ##
+		if (i == len(all_events) - 1): open('jobdone.fork', 'a').close()
+		if (sub_pid == 0 and jobid == jobpp - 1): os._exit(0)
+	while True:
+		if os.path.isfile('jobdone.fork'):
+			break
+		else:
+			time.sleep(10)
+	os.remove('jobdone.fork')
+		## Parallel with fork End ##
+	opts.cache = orig_cache
+	if (to_pred):
+		fnames = ['clf_pred_vecomnet_%i.npz' % i for i in range(len(all_events))]
+		preds = [io.read_npz(fname)['pred_lb'] for fname in fnames]
+		probs = [io.read_npz(fname)['pred_prob'] for fname in fnames]
+		pred = np.column_stack(preds)
+		prob = np.column_stack(probs)
+		pred_fpath = 'combined_pred_%s' % fnames[0].split('pred_')[1].strip('_0')
+		io.write_npz(dict(pred_lb=pred, pred_prob=prob), pred_fpath)
+		helper._pred2event(spdr, True, pred_fpath, data_path, test_X_paths=['cbow/test_X%i' % i for i in range(4)] if opts.fusion else ['%s/dev_X%i' % (prefix, i) for i in range(4)], train_Y_path='cbow/train_Y', method='cbow', source=opts.year, task=opts.task)
 	
 
 def main():
@@ -1232,6 +1324,7 @@ if __name__ == '__main__':
 	op.add_option('--eval', action='store_true', dest='eval', default=False, help='evaluation the model on the prepared training and development/testing dataset')
 	op.add_option('--fusion', action='store_true', dest='fusion', default=False, help='combine the training set with the development set for training process')
 	op.add_option('--regen', action='store_true', dest='regen', default=False, help='regenerate the training and development set')
+	op.add_option('--alnoprfx', action='store_true', dest='alnoprfx', default=False, help='ignore the prefix name when saving the stand alone components')
 	op.add_option('-m', '--method', help='main method to run')
 	op.add_option('-v', '--verbose', action='store_true', dest='verbose', default=False, help='display detailed information')
 
