@@ -9,12 +9,7 @@
 ###########################################################################
 #
 
-import os
-import sys
-import ast
-import glob
-import logging
-import itertools
+import os, sys, ast, time, glob, logging, itertools
 from optparse import OptionParser
 
 import numpy as np
@@ -31,6 +26,7 @@ FILE_DIR = os.path.dirname(os.path.realpath(__file__))
 PAR_DIR = os.path.abspath(os.path.join(FILE_DIR, os.path.pardir))
 CONFIG_FILE = os.path.join(PAR_DIR, 'etc', 'config.yaml')
 SPDR_MAP = {'bnlpst':bnlpst, 'pbmd':pm}
+MAX_TRIAL = None
 SC=';;'
 
 opts, args = {}, []
@@ -85,19 +81,25 @@ def _split_ents_evnts(ent_idx, evnt_idx, ent_split_key, evnt_split_key, n_splits
         yield [train_ents, train_evnts], [test_ents, test_evnts]
 
 
-def _contex2vec(mdl_path, fpath, X_paths, cntxvec_fpath=None, crsdev=False):
+def _contex2vec(mdl_path, fpath, X_paths, cntxvec_fpath=None, cntxvec_path=None, crsdev=False, load_alone_layers=[], alone_noprfx=False):
 	from keras.layers import Input, concatenate
 	from keras.models import Model
 	import keras.backend as K
 	from bionlp.model import kerasext, vecomnet
 	kerasext.init(backend='tf')
 	mdl_idx = int(os.path.splitext(mdl_path)[0].split('_')[-1])
-	Xs = [pd.read_hdf(fpath, xpath) for xpath in X_paths]
+	with pd.HDFStore(fpath, 'r') as store:
+		Xs = [pd.read_hdf(store, xpath) for xpath in X_paths] if fpath else X_paths
 	clf = io.read_obj(mdl_path)
 
 	custom_objects = {}
 	custom_objects = func.update_dict(func.update_dict(custom_objects, kerasext.CUSTOM_METRIC), vecomnet.CUSTOM_LOSS)
-	clf.load(os.path.splitext(mdl_path)[0], custom_objects=custom_objects, sep_arch=crsdev)
+	if (alone_noprfx):
+		aln_layers = list(set(func.flatten_list(load_alone_layers)))
+		aln_flocks = [io.lockf('%s.lock' % x) for x in aln_layers]
+	clf.load(os.path.splitext(mdl_path)[0], custom_objects=custom_objects, sep_arch=crsdev, load_alone=load_alone_layers, alone_noprfx=alone_noprfx)
+	if (alone_noprfx):
+		_ = [io.unlockf(x) for x in aln_flocks]
 	output = clf.model.get_layer(name='MLP-L1').output
 	new_mdl = Model(clf.model.input, output)
 	# print new_mdl.summary()
@@ -105,9 +107,20 @@ def _contex2vec(mdl_path, fpath, X_paths, cntxvec_fpath=None, crsdev=False):
 	# print [ebd.shape for ebd in embeddings]
 	embed_dfs = [pd.DataFrame(embed, index=Xs[0].index) for embed in embeddings]
 	# Store the argument embeddings for each event sample with the format: #DATASET_argvec#ARGGLOBALID_X#ARGLOCALID
-	cntxvec_fpath = cntxvec_fpath if cntxvec_fpath else X_paths[0].split('X')[0]
-	_ = [df.to_hdf(fpath, '%sargvec%i_X%i' % (cntxvec_fpath, mdl_idx, i), format='table') for i, df in enumerate(embed_dfs)]
-	# _ = [io.write_df(df, os.path.join(os.path.dirname(fpath), 'argvec%i_X%i' % (mdl_idx, i)), with_idx=True, compress=True) for i, df in enumerate(embed_dfs)]
+	cntxvec_fpath = cntxvec_fpath if cntxvec_fpath else fpath
+	cntxvec_path = cntxvec_path if cntxvec_path else X_paths[0].split('X')[0]
+	trial = 0 if MAX_TRIAL is None else MAX_TRIAL
+	while (MAX_TRIAL is None or trial > 0):
+		try:
+			_ = [df.to_hdf(cntxvec_fpath, '%sargvec%i_X%i' % (cntxvec_path, mdl_idx, i), format='table') for i, df in enumerate(embed_dfs)]
+			time.sleep(10)
+			# _ = [io.write_df(df, os.path.join(os.path.dirname(cntxvec_fpath), 'argvec%i_X%i' % (mdl_idx, i)), with_idx=True, compress=True) for i, df in enumerate(embed_dfs)]
+			break
+		except Exception as e:
+			print e
+			trial -= 1
+	else:
+		raise RuntimeError('Cannot write to disk!')	
 	del clf, new_mdl
 
 def contex2vec():
