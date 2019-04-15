@@ -40,8 +40,8 @@ def init_plot(plot_cfg={}, plot_common={}):
 	global plot_common_cfg
 	if (len(plot_common) > 0):
 		plot_common_cfg = plot_common
-		
-		
+
+
 def npzs2yaml(dir_path='.', mdl_t='Classifier'):
 	pw = io.param_writer(os.path.join(dir_path, 'mdlcfg'))
 	for file in fs.listf(dir_path):
@@ -67,8 +67,8 @@ def solr(sh='bash'):
 def gen_wordvec():
 	kwargs = {} if opts.cfg is None else ast.literal_eval(opts.cfg)
 	w2v.pubmed_w2v_solr('http://localhost:8983/solr/pubmed', cache_path=opts.cache, n_jobs=opts.np, **kwargs)
-	
-	
+
+
 def _split_ents_evnts(ent_idx, evnt_idx, ent_split_key, evnt_split_key, n_splits=3):
     from sklearn.model_selection import GroupKFold
     evnt_grps = map(evnt_split_key, evnt_idx)
@@ -120,7 +120,7 @@ def _contex2vec(mdl_path, fpath, X_paths, cntxvec_fpath=None, cntxvec_path=None,
 			print e
 			trial -= 1
 	else:
-		raise RuntimeError('Cannot write to disk!')	
+		raise RuntimeError('Cannot write to disk!')
 	del clf, new_mdl
 
 def contex2vec():
@@ -178,7 +178,7 @@ def combine_mdls():
 	comb_clf.model = comb_mdl
 	print comb_clf.model.summary()
 	comb_clf.save('combined_model')
-	
+
 
 def combine_preds():
 	kwargs = {} if opts.cfg is None else ast.literal_eval(opts.cfg)
@@ -208,9 +208,9 @@ def pred2pseudo():
 		rents.append('|'.join([docid, ridx]))
 	test_pseudo_Xs = [pred_df.loc[lents], pred_df.loc[rents]]
 	_ = [df.to_hdf(opts.loc, 'cbow/test_pseudo_X%i' % i, format='table', data_columns=True) for i, df in enumerate(test_pseudo_Xs)]
-	
-	
-def _pred2event(spdr_mod, combined, pred_fpath, data_path, test_X_paths=['cbow/dev_X%i' % i for i in range(4)], train_Y_path='cbow/train_Y', method='cbow', source='2011', task='bgi'):
+
+
+def _pred2event(spdr_mod, combined, pred_fpath, data_path, test_X_paths=['cbow/dev_X%i' % i for i in range(4)], train_Y_path='cbow/train_Y', dev_Y_path='cbow/dev_Y', method='cbow', year='2011', task='bgi'):
 	pred = io.read_npz(pred_fpath)['pred_lb']
 	if (combined):
 		event_mt = np.column_stack([pred[:,i] for i in range(0, pred.shape[1], 2)])
@@ -223,18 +223,19 @@ def _pred2event(spdr_mod, combined, pred_fpath, data_path, test_X_paths=['cbow/d
 	event_mt *= dir_mt
 	test_Xs = [pd.read_hdf(data_path, dspath) for dspath in test_X_paths]
 	train_Y = pd.read_hdf(data_path, train_Y_path)
-	test_Y = pd.DataFrame(event_mt, index=test_Xs[0].index, columns=train_Y.columns)
+	dev_Y = pd.read_hdf(data_path, dev_Y_path)
+	test_Y = pd.DataFrame(event_mt, index=test_Xs[0].index, columns=train_Y.columns if event_mt.shape[1] == len(train_Y.columns) else dev_Y.columns)
 	io.write_df(test_Y, 'test_Y', with_idx=True, sparse_fmt='csr', compress=True)
-	events = spdr_mod.pred2data(test_Y, method=method, source=source, task=task)
-	spdr_mod.to_a2(events, './pred', source=source, task=task)
-	
-	
+	events = spdr_mod.pred2data(test_Y, method=method, year=year, task=task)
+	spdr_mod.to_a2(events, './pred', year=year, task=task)
+
+
 def pred2event():
 	kwargs = {} if opts.cfg is None else ast.literal_eval(opts.cfg)
 	combined = kwargs.setdefault('combined', True)
-	_pred2event(spdr, combined, kwargs['pred'], opts.loc, test_X_paths=kwargs.setdefault('X', ['cbow/dev_X%i' % i for i in range(4)]), train_Y_path=kwargs.setdefault('Y', 'cbow/train_Y'), method=opts.scheme, source=opts.year, task=opts.task)
+	_pred2event(spdr, combined, kwargs['pred'], opts.loc, test_X_paths=kwargs.setdefault('X', ['cbow/dev_X%i' % i for i in range(4)]), train_Y_path=kwargs.setdefault('Y', 'cbow/train_Y'), method=opts.scheme, year=opts.year, task=opts.task)
 
-	
+
 def main():
 	if (opts.method is None):
 		return
@@ -252,7 +253,7 @@ def main():
 		pred2pseudo()
 	elif (opts.method == 'p2e'):
 		pred2event()
-	
+
 
 if __name__ == '__main__':
 	# Logging setting
@@ -285,7 +286,7 @@ if __name__ == '__main__':
 		op.print_help()
 		op.error('Please input options instead of arguments.')
 		sys.exit(1)
-	
+
 	spdr = SPDR_MAP[opts.input]
 	# Parse config file
 	if (os.path.exists(CONFIG_FILE)):
@@ -299,7 +300,7 @@ if __name__ == '__main__':
 		plot_cfg = cfgr('bionlp.util.plot', 'init')
 		plot_common = cfgr('bionlp.util.plot', 'common')
 		init_plot(plot_cfg=plot_cfg, plot_common=plot_common)
-		
+
 	if (opts.dend is not None):
 		if (opts.dend == 'th' and opts.gpunum == 0):
 			from multiprocessing import cpu_count
