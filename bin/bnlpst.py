@@ -28,10 +28,7 @@ from bionlp.util import fs, io, func
 from bionlp import nlp
 
 
-if sys.platform.startswith('win32'):
-	DATA_PATH = 'D:\\data\\bioevent\\bnlpst'
-elif sys.platform.startswith('linux2'):
-	DATA_PATH = os.path.join(os.path.expanduser('~'), 'data', 'bioevent', 'bnlpst')
+DATA_PATH = os.path.join(os.path.expanduser('~'), 'data', 'bioevent', 'bnlpst')
 EVNT_LB = {'2016':['Lives_In'], '2013':['Localization', 'PartOf'], '2011':['RegulonDependence', 'BindTo', 'TranscriptionFrom', 'RegulonMember', 'SiteOf', 'TranscriptionBy', 'PromoterOf', 'PromoterDependence', 'ActionTarget', 'Interaction']}
 EVNT_ARG_TYPE = {'2016':{'Lives_In':['Bacteria', 'Location']}, '2013':{'Localization':['Bacterium', 'Localization'], 'PartOf':['Host', 'Part']}, '2011':{'RegulonDependence':['Regulon', 'Target'], 'BindTo':['Agent', 'Target'], 'TranscriptionFrom':['Transcription', 'Site'], 'RegulonMember':['Regulon', 'Member'], 'SiteOf':['Site', 'Entity'], 'TranscriptionBy':['Transcription', 'Agent'], 'PromoterOf':['Promoter', 'Gene'], 'PromoterDependence':['Promoter', 'Protein'], 'ActionTarget':['Action', 'Target'], 'Interaction':['Agent', 'Target']}}
 
@@ -43,28 +40,28 @@ dpnd_classmap = {}
 
 
 # Get the annotations, segmentations, and the dependcies from a1 file
-def get_preprcs(docids, dataset='train', source='2016', task='bb', method='spacy', disable=[]):
+def get_preprcs(docids, dataset='train', year='2016', task='bb', method='spacy', disable=[]):
 	preprcs = []
 	if (dataset == 'train'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'train')
+		dir_path = os.path.join(DATA_PATH, year, task, 'train')
 	elif (dataset == 'dev'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'dev')
+		dir_path = os.path.join(DATA_PATH, year, task, 'dev')
 	elif (dataset == 'test'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'test')
+		dir_path = os.path.join(DATA_PATH, year, task, 'test')
 	for did in docids:
-		preprcs.append(get_a1(os.path.join(dir_path, did + '.a1'), source=source, method=method, disable=disable))
+		preprcs.append(get_a1(os.path.join(dir_path, did + '.a1'), year=year, method=method, disable=disable))
 	return preprcs
 
 
-def get_a1(fpath, source='2016', task='bb', method='spacy', disable=[]):
-	if (source == '2016'):
+def get_a1(fpath, year='2016', task='bb', method='spacy', disable=[]):
+	if (year == '2016'):
 		return get_a1_2016(fpath, method=method, disable=disable)
-	elif (source == '2013'):
+	elif (year == '2013'):
 		return get_a1_2013(fpath, method=method, disable=disable)
-	elif (source == '2011'):
+	elif (year == '2011'):
 		return get_a1_2011(fpath, method=method, disable=disable)
-	
-	
+
+
 def get_a1_2016(fpath, method='spacy', disable=[]):
 	global dpnd_classmap
 	try:
@@ -98,7 +95,7 @@ def get_a1_2016(fpath, method='spacy', disable=[]):
 	except:
 		print 'Can not open the file \'%s\'!' % fpath
 		sys.exit(-1)
-	
+
 	if ('parse' in disable): return sent_bndry, words, annots, gddfs, coref
 
 	content = nlp.clean_text(title + '\n' + '\n'.join(text), encoding='' if method == 'spacy' else 'ascii')
@@ -123,8 +120,8 @@ def get_a1_2016(fpath, method='spacy', disable=[]):
 	annots['tkns'], words['annot_id'] = nlp.annot_align(annots['loc'], words['loc'])
 
 	return sent_bndry, words, annots, gddfs, coref
-	
-	
+
+
 def get_a1_2013(fpath, method='spacy', disable=[]):
 	try:
 		title, [text, sent_bndry, gddfs, coref] = '', [[] for i in range(4)]
@@ -150,7 +147,7 @@ def get_a1_2013(fpath, method='spacy', disable=[]):
 	except:
 		print 'Can not open the file \'%s\'!' % fpath
 		sys.exit(-1)
-	
+
 	if ('parse' in disable): return sent_bndry, words, annots, gddfs, coref
 
 	content = nlp.clean_text(''.join(fs.read_file('%s.txt' % os.path.splitext(fpath)[0])), encoding='' if method == 'spacy' else 'ascii')
@@ -175,7 +172,7 @@ def get_a1_2013(fpath, method='spacy', disable=[]):
 	annots['tkns'], words['annot_id'] = nlp.annot_align(annots['loc'], words['loc'], error=1)
 
 	return sent_bndry, words, annots, gddfs, coref
-	
+
 
 def get_a1_2011(fpath, method='spacy', disable=[]):
 	try:
@@ -208,7 +205,7 @@ def get_a1_2011(fpath, method='spacy', disable=[]):
 	sent_bndry = np.array([0, len(words['str'])])
 	# Map the annotations to the tokens
 	annots['tkns'], words['annot_id'] = nlp.annot_align(annots['loc'], words['loc'])
-	
+
 	if ('parse' in disable): return sent_bndry, words, annots, gddfs, coref
 
 	# Generate the Stems of tokens
@@ -243,7 +240,7 @@ def get_a1_2011(fpath, method='spacy', disable=[]):
 		for x in xrange(len(oprnds)):
 			words['pos'][words['id'].index(oprnds[x])] = pos_list[x]
 
-		# Deal with appositive, link the synonym together into a list, assign the pos to each synonym according to the one has non-appos pos 
+		# Deal with appositive, link the synonym together into a list, assign the pos to each synonym according to the one has non-appos pos
 		for x in xrange(len(words['pos'])):
 			match_rs = re.compile('^AS_(.*)').match(words['pos'][x])
 			identcls = [x]
@@ -261,7 +258,7 @@ def get_a1_2011(fpath, method='spacy', disable=[]):
 				for y in identcls:	# The last identical word does not have non-appos pos, namely found a cycle link
 					words['pos'][y] = ''
 				continue
-			
+
 	# Grammatical dependency matrix
 	if ('dependency' not in disable):
 		gdmt = nlp.dpnd_trnsfm(dpnd_mt, (len(words['str']), len(words['str'])), encoding='categorical', class_lbmap=dpnd_classmap)
@@ -269,29 +266,29 @@ def get_a1_2011(fpath, method='spacy', disable=[]):
 	return sent_bndry, words, annots, gddfs, coref
 
 
-# Get the events from a2 file	
-def get_evnts(docids, dataset='train', source='2016', task='bb'):
+# Get the events from a2 file
+def get_evnts(docids, dataset='train', year='2016', task='bb'):
 	event_list = []
 	if (dataset == 'train'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'train')
+		dir_path = os.path.join(DATA_PATH, year, task, 'train')
 	elif (dataset == 'dev'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'dev')
+		dir_path = os.path.join(DATA_PATH, year, task, 'dev')
 	elif (dataset == 'test'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'test')
+		dir_path = os.path.join(DATA_PATH, year, task, 'test')
 	for did in docids:
-		event_list.append(get_a2(os.path.join(dir_path, did + '.a2'), source=source))
+		event_list.append(get_a2(os.path.join(dir_path, did + '.a2'), year=year))
 	return event_list
 
-	
-def get_a2(fpath, source='2016', task='bb'):
-	if (source == '2016'):
+
+def get_a2(fpath, year='2016', task='bb'):
+	if (year == '2016'):
 		return get_a2_2016(fpath)
-	elif (source == '2013'):
+	elif (year == '2013'):
 		return get_a2_2013(fpath)
-	elif (source == '2011'):
+	elif (year == '2011'):
 		return get_a2_2011(fpath)
-	
-	
+
+
 def get_a2_2016(fpath):
 	try:
 		events = {'id':[], 'type':[], 'oprnd_tps':[], 'oprnds':[], 'oprnd_words':[]} # Interaction events
@@ -309,8 +306,8 @@ def get_a2_2016(fpath):
 		print 'Can not open the file \'%s\'!' % fpath
 		sys.exit(-1)
 	return events
-	
-	
+
+
 def get_a2_2013(fpath):
 	try:
 		events = {'id':[], 'type':[], 'oprnd_tps':[], 'oprnds':[], 'oprnd_words':[]} # Interaction events
@@ -328,7 +325,7 @@ def get_a2_2013(fpath):
 		print 'Can not open the file \'%s\'!' % fpath
 		sys.exit(-1)
 	return events
-	
+
 
 def get_a2_2011(fpath):
 	try:
@@ -347,33 +344,33 @@ def get_a2_2011(fpath):
 		print 'Can not open the file \'%s\'!' % fpath
 		sys.exit(-1)
 	return events
-	
+
 
 # Get the document ids
-def get_docid(dataset='train', source='2016', task='bb'):
+def get_docid(dataset='train', year='2016', task='bb'):
 	if (dataset == 'train'):
-		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, source, task, 'train')) if re.match(r'.*\.txt', fpath)]
+		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, year, task, 'train')) if re.match(r'.*\.txt', fpath)]
 	elif (dataset == 'dev'):
-		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, source, task, 'dev')) if re.match(r'.*\.txt', fpath)]
+		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, year, task, 'dev')) if re.match(r'.*\.txt', fpath)]
 	elif (dataset == 'test'):
-		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, source, task, 'test')) if re.match(r'.*\.txt', fpath)]
+		files = [os.path.splitext(fpath)[0] for fpath in os.listdir(os.path.join(DATA_PATH, year, task, 'test')) if re.match(r'.*\.txt', fpath)]
 	return files
-	
+
 
 # Get the document text
-def get_corpus(docids, dataset='train', source='2016', task='bb', ext_fmt='txt'):
+def get_corpus(docids, dataset='train', year='2016', task='bb', ext_fmt='txt'):
 	corpus = []
 	if (dataset == 'train'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'train')
+		dir_path = os.path.join(DATA_PATH, year, task, 'train')
 	elif (dataset == 'dev'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'dev')
+		dir_path = os.path.join(DATA_PATH, year, task, 'dev')
 	elif (dataset == 'test'):
-		dir_path = os.path.join(DATA_PATH, source, task, 'test')
+		dir_path = os.path.join(DATA_PATH, year, task, 'test')
 	for did in docids:
 		corpus.append(''.join(fs.read_file(os.path.join(dir_path, did+'.%s'%ext_fmt), 'utf8')))
 	return corpus
-	
-	
+
+
 def get_data(raw_data, method='cbow', scheme='', **kwargs):
 	if (method == 'trigger'):
 		if (scheme == 'trgs'):
@@ -387,7 +384,7 @@ def get_data(raw_data, method='cbow', scheme='', **kwargs):
 ## Start Trigger-based Approach ##
 POS_WEIGHT = {'universal':{'VERB':1, 'ADP':1}, 'stanford':{'VBP':1, 'IN':1}, 'bnlpst2011':{'V\(\w+\)|V_PASS|V':1}}
 NOUN_POS = {'universal':'NOUN', 'stanford':'NN|NNS', 'bnlpst2011':'N\(\w+\)|V'}
-	
+
 # Get the trigger from a specific file
 def get_trgwd(fpath):
 	trg_wds = []
@@ -399,13 +396,13 @@ def get_trgwd(fpath):
 	return trg_wds
 
 
-def _find_trg(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_type='universal'):
+def _find_trg(words, wid1, wid2, dist_mt, prdcs, year='2016', task='bb', pos_type='universal'):
 	global POS_WEIGHT
 	r_pos = re.compile(r'\b^'+r'$\b|\b^'.join(POS_WEIGHT[pos_type].keys())+r'$\b', flags=re.I | re.X)
-	trg_wds = get_trgwd(os.path.join(os.path.join(DATA_PATH, source, task, 'trigger'), 'TRIGGERWORDS.txt'))
+	trg_wds = get_trgwd(os.path.join(os.path.join(DATA_PATH, year, task, 'trigger'), 'TRIGGERWORDS.txt'))
 	r_patn = re.compile(r'\b^'+r'$\b|\b^'.join(trg_wds)+r'$\b', flags=re.I | re.X)
 	trg_evntoprt = {'2016':['None'], '2013':['None'],'2011':['Action']}
-	r_evntoprt = re.compile(r'(?=('+'|'.join(trg_evntoprt[source])+r'))', flags=re.I | re.X)
+	r_evntoprt = re.compile(r'(?=('+'|'.join(trg_evntoprt[year])+r'))', flags=re.I | re.X)
 	trigger, prdc = None, wid2
 	if (r_pos.match(words['pos'][wid1]) or r_evntoprt.findall(','.join(words['evnt_annotp'][wid1])) or r_patn.findall(words['str'][wid1]) or r_patn.findall(words['stem'][wid1]) or r_pos.match(words['stem_pos'][wid1])):
 		return wid1
@@ -421,9 +418,9 @@ def _find_trg(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_t
 	if (trigger is None):
 		print 'Trigger not found between (%s, %s)' % (words['str'][wid1], words['str'][wid2])
 	return trigger
-	
-	
-def find_trgs(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_type='universal'):
+
+
+def find_trgs(words, wid1, wid2, dist_mt, prdcs, year='2016', task='bb', pos_type='universal'):
 	global POS_WEIGHT
 	r_pos = re.compile(r'|'.join(POS_WEIGHT[pos_type].keys()), flags=re.I | re.X)
 	prdc, triggers = wid1, []
@@ -434,8 +431,8 @@ def find_trgs(words, wid1, wid2, dist_mt, prdcs, source='2016', task='bb', pos_t
 			break
 		prdc = prdcs[wid2,prdc]
 	return triggers
-	
-	
+
+
 def print_tokens(tokens, trg_lbs=None, annots=None):
 	result = []
 	for i, token in enumerate(tokens):
@@ -446,8 +443,8 @@ def print_tokens(tokens, trg_lbs=None, annots=None):
 		result.append(token)
 	return ' '.join(result)
 
-	
-def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', ft_type='binary', max_df=1.0, min_df=1, parser='spacy', db_name='mesh2016', db_type='LevelDB', store_path='store'):
+
+def get_data_trgs(raw_data, from_file=None, dataset='train', year='2016', task='bb', fmt='npz', spfmt='csr', ft_type='binary', max_df=1.0, min_df=1, parser='spacy', db_name='mesh2016', db_type='LevelDB', store_path='store'):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -456,13 +453,13 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task
 			file_name = from_file
 		if (dataset == 'test'):
 			print 'Reading file: %s' % (file_name[0])
-			return io.read_df(os.path.join(DATA_PATH, source, task, file_name[0]), with_idx=True, sparse_fmt=spfmt)
+			return io.read_df(os.path.join(DATA_PATH, year, task, file_name[0]), with_idx=True, sparse_fmt=spfmt)
 		print 'Reading file: %s and %s' % (file_name[0], file_name[1])
 		if (fmt == 'npz'):
-			return io.read_df(os.path.join(DATA_PATH, source, task, file_name[0]), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, file_name[1]), with_idx=True, sparse_fmt=spfmt)
+			return io.read_df(os.path.join(DATA_PATH, year, task, file_name[0]), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, year, task, file_name[1]), with_idx=True, sparse_fmt=spfmt)
 		else:
-			return pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[0]), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[1]), index_col=0, encoding='utf8')
-	if (source == '2011'):
+			return pd.read_csv(os.path.join(DATA_PATH, year, task, file_name[0]), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, year, task, file_name[1]), index_col=0, encoding='utf8')
+	if (year == '2011'):
 		pos_type = 'bnlpst2011'
 	elif (parser == 'spacy'):
 		pos_type = 'universal'
@@ -484,7 +481,7 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task
 	ft_order = ['sub', 'trg', 'obj']
 	ft_name = {'sub':'Subject', 'trg':'Triggers', 'obj':'Object'}
 	ft_dic = {'sub':ft_sub_str, 'trg':ft_trg_str, 'obj':ft_obj_str}
-	evnt_lb = EVNT_LB[source]
+	evnt_lb = EVNT_LB[year]
 	vft_dic, evnt_stat = [{} for i in range(2)]
 	## Extract features from raw data
 	for docid, corpus, preprcs, events in zip(raw_data['docids'], raw_data['corpus'], raw_data['preprcs'], raw_data['evnts']):
@@ -554,7 +551,7 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task
 			if (idx_pair is None):
 				# print 'Skip: <%s,%s> in %s@%s' % (annots['id'][e_sub], annots['id'][e_obj], docid, dataset)
 				continue
-			triggers = find_trgs(words, idx_pair[0], idx_pair[1], dist_mt, prdcs, pos_type=pos_type, source=source)
+			triggers = find_trgs(words, idx_pair[0], idx_pair[1], dist_mt, prdcs, pos_type=pos_type, year=year)
 			# Eliminate the tokens of entity pair in the triggers
 			for wid in annots['tkns'][e_sub] + annots['tkns'][e_obj]:
 				try:
@@ -584,7 +581,7 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task
 			label.append(v[3])
 	# g.close()
 	mm_wrapper.stop_service()
-	
+
 	## Convert the raw features into binary features
 	Vectorizer = TfidfVectorizer if ft_type == 'tfidf' else CountVectorizer
 	sub_vctrz, trg_vctrz, obj_vctrz = [Vectorizer(analyzer='word', ngram_range=(1, 2), stop_words='english', lowercase=False, max_df=max_df, min_df=min_df, binary=True if ft_type=='binary' else False) for i in range(3)]
@@ -593,18 +590,18 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task
 		ft_mt = vctrz_dic[fset].fit_transform(ft_dic[fset]).tocsr()
 		classes = [cls[0] for cls in sorted(vctrz_dic[fset].vocabulary_.items(), key=operator.itemgetter(1))]
 		vft_dic[fset] = (ft_mt, classes)
-		
+
 	## Label Construction
 	if (dataset != 'test'):
 		mlb = MultiLabelBinarizer()
 		bin_label = (mlb.fit_transform(label), mlb.classes_)
-	
+
 	## Generate the features as well as the labels to form a completed dataset
 	feat_mt = sp.sparse.hstack([vft_dic[fset][0] for fset in ft_order])
 	feat_cols = ['%s_%s' % (fset, w) for fset in ft_order for w in vft_dic[fset][1]]
 	feat_df = pd.DataFrame(feat_mt.todense(), index=evnt_index, columns=feat_cols)
 	if (dataset != 'test'):
-		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[tuple([lb] + EVNT_ARG_TYPE[source][lb]) for lb in bin_label[1]], dtype='int8')
+		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[tuple([lb] + EVNT_ARG_TYPE[year][lb]) for lb in bin_label[1]], dtype='int8')
 
 	## Sampling
 	obj_samp_idx = np.random.random_integers(0, feat_df.shape[0] - 1, size=200).tolist()
@@ -615,24 +612,24 @@ def get_data_trgs(raw_data, from_file=None, dataset='train', source='2016', task
 
 	## Output the dataset
 	if (fmt == 'npz'):
-		io.write_df(feat_df, os.path.join(DATA_PATH, source, task, '%s_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
-		io.write_df(samp_feat_df, os.path.join(DATA_PATH, source, task, '%s_sample_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+		io.write_df(feat_df, os.path.join(DATA_PATH, year, task, '%s_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+		io.write_df(samp_feat_df, os.path.join(DATA_PATH, year, task, '%s_sample_X.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
 		if (dataset != 'test'):
-			io.write_df(label_df, os.path.join(DATA_PATH, source, task, '%s_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
-			io.write_df(samp_lb_df, os.path.join(DATA_PATH, source, task, '%s_sample_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+			io.write_df(label_df, os.path.join(DATA_PATH, year, task, '%s_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
+			io.write_df(samp_lb_df, os.path.join(DATA_PATH, year, task, '%s_sample_Y.npz' % dataset), with_idx=True, sparse_fmt=spfmt, compress=True)
 	else:
-		feat_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_X.csv' % dataset), encoding='utf8')
-		samp_feat_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_sample_X.csv' % dataset), encoding='utf8')
+		feat_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_X.csv' % dataset), encoding='utf8')
+		samp_feat_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_sample_X.csv' % dataset), encoding='utf8')
 		if (dataset != 'test'):
-			label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_Y.csv' % dataset), encoding='utf8')
-			samp_lb_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_sample_Y.csv' % dataset), encoding='utf8')
+			label_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_Y.csv' % dataset), encoding='utf8')
+			samp_lb_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_sample_Y.csv' % dataset), encoding='utf8')
 	if (dataset != 'test'):
 		return feat_df, label_df
 	else:
 		return feat_df
 
-		
-def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', ft_type='binary', max_df=1.0, min_df=1, parser='spacy'):
+
+def get_data_trg(raw_data, from_file=None, dataset='train', year='2016', task='bb', fmt='npz', spfmt='csr', ft_type='binary', max_df=1.0, min_df=1, parser='spacy'):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -641,15 +638,15 @@ def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task=
 			word_X_name, word_y_name, edge_X_name, edge_y_name = from_file
 		if (dataset == 'test'):
 			print 'Reading file: %s, %s' % (word_X_name, 'test_rawdata.pkl')
-			return io.read_df(os.path.join(DATA_PATH, source, task, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+			return io.read_df(os.path.join(DATA_PATH, year, task, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_obj(os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 		print 'Reading file: %s, %s, %s, %s' % (word_X_name, word_y_name, edge_X_name, edge_y_name)
 		if (fmt == 'npz'):
-			return io.read_df(os.path.join(DATA_PATH, source, task, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, word_y_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, edge_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, source, task, edge_y_name), with_idx=True, sparse_fmt=spfmt)
+			return io.read_df(os.path.join(DATA_PATH, year, task, word_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, year, task, word_y_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, year, task, edge_X_name), with_idx=True, sparse_fmt=spfmt), io.read_df(os.path.join(DATA_PATH, year, task, edge_y_name), with_idx=True, sparse_fmt=spfmt)
 		else:
-			return pd.read_csv(os.path.join(DATA_PATH, source, task, word_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, word_y_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, edge_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, source, task, edge_y_name), index_col=0, encoding='utf8')
-			
+			return pd.read_csv(os.path.join(DATA_PATH, year, task, word_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, year, task, word_y_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, year, task, edge_X_name), index_col=0, encoding='utf8'), pd.read_csv(os.path.join(DATA_PATH, year, task, edge_y_name), index_col=0, encoding='utf8')
+
 	global ft_offset
-	idx_range, evnt_lb, dist_mt_list, r_pos = [0, 0], EVNT_LB[source], [], re.compile('.*V.*')
+	idx_range, evnt_lb, dist_mt_list, r_pos = [0, 0], EVNT_LB[year], [], re.compile('.*V.*')
 	## Feature columns
 	# Token features
 	[ft_str, ft_cap, ft_pun, ft_digit, ft_stem, ft_pos, ft_btgram] = [[] for x in range(7)]
@@ -658,7 +655,7 @@ def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task=
 	ft_order = ['has_cap', 'has_pun', 'has_digit', 'stem', 'pos', 'bt_gram']
 	ft_name = ['Has Capital Letter', 'Has Punctuation', 'Has Digit', 'Stem', 'POS', 'Bi-Tri-Gram']
 	ft_dic = {'has_cap':ft_cap, 'has_pun':ft_pun, 'has_digit':ft_digit, 'stem':ft_stem, 'pos':ft_pos, 'bt_gram':ft_btgram}
-	
+
 	# Statistical features
 	[bft_dic, stem_frqs, pos_frqs, spos_frqs, annotp_frqs, annoth_frqs, evntp_frqs, evntoprt_frqs, evntoprd_frqs, dpnd_mt] = [{} for x in range(10)]
 	# Extract information from raw data
@@ -722,7 +719,7 @@ def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task=
 				for y in xrange(-1, -len(words_pair[1])-1, -1):
 					if (dist_mt[x, y] > longest_path):
 						idx_pair = (x, y)
-			trigger = _find_trg(words, idx_pair[0], idx_pair[1], dist_mt, prdcs, source=source)
+			trigger = _find_trg(words, idx_pair[0], idx_pair[1], dist_mt, prdcs, year=year)
 			if (trigger is not None):
 				ft_trigger[idx_range[0] + trigger] = events['type'][i]
 				# Generate the positive training samples, format: <src_wid, tgt_wid, distance>
@@ -776,15 +773,15 @@ def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task=
 	wm_cols = ft_order[0:3] + ['%s_%s' % (fset, w) for fset in ft_order[3:] for w in bft_dic[fset][1]]
 	word_df = pd.DataFrame(word_mt, columns=wm_cols)
 	if (fmt == 'npz'):
-		io.write_df(word_df, os.path.join(DATA_PATH, source, task, '%swX.npz'%dataset), sparse_fmt=spfmt, compress=True)
+		io.write_df(word_df, os.path.join(DATA_PATH, year, task, '%swX.npz'%dataset), sparse_fmt=spfmt, compress=True)
 	else:
-		word_df.to_csv(os.path.join(DATA_PATH, source, task, '%swX.csv'%dataset), encoding='utf8')
+		word_df.to_csv(os.path.join(DATA_PATH, year, task, '%swX.csv'%dataset), encoding='utf8')
 
 	if (dataset == 'test'):
 		# Save intermediate data
 		raw_data['word_offset'] = ft_offset[dataset]
 		raw_data['dist_mts'] = dist_mt_list
-		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 		return word_df, raw_data
 	else:
 		# Construct trigger label
@@ -799,20 +796,20 @@ def get_data_trg(raw_data, from_file=None, dataset='train', source='2016', task=
 		edge_df = pd.DataFrame(edge_mt, columns=em_cols)
 		edge_lb_mt = label_binarize(ft_edgelb, classes=evnt_lb if len(evnt_lb) > 1 else ['']+evnt_lb)
 		edge_lb = pd.DataFrame(edge_lb_mt, columns=evnt_lb)
-		
+
 		if (fmt == 'npz'):
-			io.write_df(trg_lb, os.path.join(DATA_PATH, source, task, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(edge_df, os.path.join(DATA_PATH, source, task, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(edge_lb, os.path.join(DATA_PATH, source, task, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(trg_lb, os.path.join(DATA_PATH, year, task, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_df, os.path.join(DATA_PATH, year, task, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_lb, os.path.join(DATA_PATH, year, task, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
 		else:
-			trg_lb.to_csv(os.path.join(DATA_PATH, source, task, '%swY.csv'%dataset), encoding='utf8')
-			edge_df.to_csv(os.path.join(DATA_PATH, source, task, '%seX.csv'%dataset), encoding='utf8')
-			edge_lb.to_csv(os.path.join(DATA_PATH, source, task, '%seY.csv'%dataset), encoding='utf8')
+			trg_lb.to_csv(os.path.join(DATA_PATH, year, task, '%swY.csv'%dataset), encoding='utf8')
+			edge_df.to_csv(os.path.join(DATA_PATH, year, task, '%seX.csv'%dataset), encoding='utf8')
+			edge_lb.to_csv(os.path.join(DATA_PATH, year, task, '%seY.csv'%dataset), encoding='utf8')
 
 		return word_df, trg_lb, edge_df, edge_lb
-		
-		
-def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', window_size=10, maxlen=None, npg_ratio=1.0):
+
+
+def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, dataset='train', year='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', window_size=10, maxlen=None, npg_ratio=1.0):
 	global dpnd_classmap
 	import xarray as xr
 	from keras.utils import to_categorical
@@ -831,7 +828,7 @@ def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, da
 		words['entype_embedding_id'] = [annots['type_embedding_id'][aid] for aid in words['annot_id']]
 		data.append((words['embedding_id'], words['entype_embedding_id'], annots['embedding_id'], depends))
 	word_vec_ids, ent_type_ids, ent_ids, depends_list = zip(*data)
-	
+
 	## Feature Construction
 	from keras.preprocessing import sequence
 	embedid_seqs = [sequence.pad_sequences(x, maxlen=maxlen, dtype='int64', padding='pre', truncating='pre', value=last_widx) for x in [word_vec_ids, ent_type_ids, ent_ids]]
@@ -848,28 +845,28 @@ def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, da
 	feat_dfs = [pd.DataFrame(mt, index=raw_data['docids'], columns=['word_%i'%i for i in range(mt.shape[1])], dtype='int64') for mt in data[:2]]
 	feat_dfs.append(pd.DataFrame(data[2], index=raw_data['docids'], columns=['entity_%i'%i for i in range(mt.shape[1])], dtype='int64'))
 	feat_dfs.append(xr.DataArray(data[3], coords=[raw_data['docids'], ['word_%i' % i for i in range(max_word_num)], dpnd_classmap.values()], dims=['doc', 'word', 'dpnd_type']))
-	
+
 	for df_name, df in zip(['word_vectors', 'entity_types', 'entities'], feat_dfs[:3]):
 		if (fmt == 'npz'):
-			io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_%s.npz' % (dataset, df_name)), sparse_fmt=None, compress=True)
+			io.write_df(df, os.path.join(DATA_PATH, year, task, '%s_%s.npz' % (dataset, df_name)), sparse_fmt=None, compress=True)
 		elif (fmt == 'h5'):
-			df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'jointee/%s_%s' % (dataset, df_name), format='table', data_columns=True)
+			df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), 'jointee/%s_%s' % (dataset, df_name), format='table', data_columns=True)
 		else:
-			df.to_csv(os.path.join(DATA_PATH, source, task, '%s_%s.csv' % (dataset, df_name)), encoding='utf8')
-	
+			df.to_csv(os.path.join(DATA_PATH, year, task, '%s_%s.csv' % (dataset, df_name)), encoding='utf8')
+
 	df_name = 'depends_vectors'
 	if (fmt == 'npz'):
-		io.write_spdf(df, os.path.join(DATA_PATH, source, task, '%s_%s.npz' % (dataset, df_name)), with_col=True, with_idx=True, sparse_fmt=None, compress=True)
+		io.write_spdf(df, os.path.join(DATA_PATH, year, task, '%s_%s.npz' % (dataset, df_name)), with_col=True, with_idx=True, sparse_fmt=None, compress=True)
 	elif (fmt == 'h5'):
-		df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), 'jointee/%s_%s' % (dataset, df_name), format='table', data_columns=True)
+		df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), 'jointee/%s_%s' % (dataset, df_name), format='table', data_columns=True)
 	else:
-		df.to_csv(os.path.join(DATA_PATH, source, task, '%s_%s.csv' % (dataset, df_name)), encoding='utf8')
+		df.to_csv(os.path.join(DATA_PATH, year, task, '%s_%s.csv' % (dataset, df_name)), encoding='utf8')
 
 	if (dataset == 'test'):
 		# Save intermediate data
 		raw_data['word_offset'] = ft_offset[dataset]
 		raw_data['dist_mts'] = dist_mt_list
-		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 		return feat_dfs, raw_data
 	else:
 		# Construct trigger label
@@ -883,25 +880,25 @@ def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, da
 		edge_df = pd.DataFrame(edge_mt, columns=em_cols)
 		edge_lb_mt = label_binarize(ft_edgelb, classes=evnt_lb if len(evnt_lb) > 1 else ['']+evnt_lb)
 		edge_lb = pd.DataFrame(edge_lb_mt, columns=evnt_lb)
-		
+
 		if (fmt == 'npz'):
-			io.write_df(trg_lb, os.path.join(DATA_PATH, source, task, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(edge_df, os.path.join(DATA_PATH, source, task, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(edge_lb, os.path.join(DATA_PATH, source, task, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(trg_lb, os.path.join(DATA_PATH, year, task, '%swY.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_df, os.path.join(DATA_PATH, year, task, '%seX.npz'%dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(edge_lb, os.path.join(DATA_PATH, year, task, '%seY.npz'%dataset), sparse_fmt=spfmt, compress=True)
 		else:
-			trg_lb.to_csv(os.path.join(DATA_PATH, source, task, '%swY.csv'%dataset), encoding='utf8')
-			edge_df.to_csv(os.path.join(DATA_PATH, source, task, '%seX.csv'%dataset), encoding='utf8')
-			edge_lb.to_csv(os.path.join(DATA_PATH, source, task, '%seY.csv'%dataset), encoding='utf8')
+			trg_lb.to_csv(os.path.join(DATA_PATH, year, task, '%swY.csv'%dataset), encoding='utf8')
+			edge_df.to_csv(os.path.join(DATA_PATH, year, task, '%seX.csv'%dataset), encoding='utf8')
+			edge_lb.to_csv(os.path.join(DATA_PATH, year, task, '%seY.csv'%dataset), encoding='utf8')
 
 		return word_df, trg_lb, edge_df, edge_lb
 
 
 ## End Trigger-based Approach ##
-  
+
 
 ## Start Non-Trigger Approach ##
 
-def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, prefix='cbow', dataset='train', source='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', cw2v_path=None, window_size=10, include_target=True, maxlen=None, npg_ratio=1.0, concept_embed=False):
+def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, prefix='cbow', dataset='train', year='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', cw2v_path=None, window_size=10, include_target=True, maxlen=None, npg_ratio=1.0, concept_embed=False):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -920,18 +917,18 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 		if (dataset == 'test'):
 			print 'Reading files: %s' % (', '.join(file_name[0]))
 			if (fmt == 'npz'):
-				return [io.read_df(os.path.join(DATA_PATH, source, task, fname), with_idx=True, sparse_fmt=None) for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+				return [io.read_df(os.path.join(DATA_PATH, year, task, fname), with_idx=True, sparse_fmt=None) for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 			elif (fmt == 'h5'):
-				return [pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=fname, iterator=iterator, chunksize=batch_size if iterator else None) for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+				return [pd.read_hdf(os.path.join(DATA_PATH, year, task, file_name[2]), key=fname, iterator=iterator, chunksize=batch_size if iterator else None) for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 			else:
-				return [pd.read_csv(os.path.join(DATA_PATH, source, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+				return [pd.read_csv(os.path.join(DATA_PATH, year, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], io.read_obj(os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 		print 'Reading files: %s and %s' % (', '.join(file_name[0]), file_name[1])
 		if (fmt == 'npz'):
-			return [io.read_df(os.path.join(DATA_PATH, source, task, fname), with_idx=True, sparse_fmt=None) for fname in file_name[0]], io.read_df(os.path.join(DATA_PATH, source, task, file_name[1]), with_idx=True, sparse_fmt=spfmt) if (type(file_name[1]) != list) else [io.read_df(os.path.join(DATA_PATH, source, task, y), with_idx=True, sparse_fmt=spfmt) for y in file_name[1]]
+			return [io.read_df(os.path.join(DATA_PATH, year, task, fname), with_idx=True, sparse_fmt=None) for fname in file_name[0]], io.read_df(os.path.join(DATA_PATH, year, task, file_name[1]), with_idx=True, sparse_fmt=spfmt) if (type(file_name[1]) != list) else [io.read_df(os.path.join(DATA_PATH, year, task, y), with_idx=True, sparse_fmt=spfmt) for y in file_name[1]]
 		elif (fmt == 'h5'):
-			return [pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=fname, iterator=iterator, chunksize=batch_size if iterator else None) for fname in file_name[0]], pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=file_name[1], iterator=iterator, chunksize=batch_size if iterator else None) if (type(file_name[1]) != list) else [pd.read_hdf(os.path.join(DATA_PATH, source, task, file_name[2]), key=y, iterator=iterator, chunksize=batch_size if iterator else None) for y in file_name[1]]
+			return [pd.read_hdf(os.path.join(DATA_PATH, year, task, file_name[2]), key=fname, iterator=iterator, chunksize=batch_size if iterator else None) for fname in file_name[0]], pd.read_hdf(os.path.join(DATA_PATH, year, task, file_name[2]), key=file_name[1], iterator=iterator, chunksize=batch_size if iterator else None) if (type(file_name[1]) != list) else [pd.read_hdf(os.path.join(DATA_PATH, year, task, file_name[2]), key=y, iterator=iterator, chunksize=batch_size if iterator else None) for y in file_name[1]]
 		else:
-			return [pd.read_csv(os.path.join(DATA_PATH, source, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], pd.read_csv(os.path.join(DATA_PATH, source, task, file_name[1]), index_col=0, encoding='utf8') if (type(file_name[1]) != list) else [pd.read_csv(os.path.join(DATA_PATH, source, task, y), index_col=0, encoding='utf8') for y in file_name[1]]
+			return [pd.read_csv(os.path.join(DATA_PATH, year, task, fname), index_col=0, encoding='utf8') for fname in file_name[0]], pd.read_csv(os.path.join(DATA_PATH, year, task, file_name[1]), index_col=0, encoding='utf8') if (type(file_name[1]) != list) else [pd.read_csv(os.path.join(DATA_PATH, year, task, y), index_col=0, encoding='utf8') for y in file_name[1]]
 	from bionlp.model import vecomnet
 	w2v_wrapper = w2v.GensimW2VWrapper(w2v_path)
 	if (cw2v_path is not None and os.path.exists(cw2v_path)):
@@ -952,7 +949,7 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			concepts, pubtator_cli = [], pubtator.PubTatorAPI()
 			# Retrieve the concept annotations
 			res = pubtator_cli.get_concepts_pmid('all', [x for x in docid.split('-') if x.isdigit()][0], fmt='BioC')
-			prgrphs = xmlextrc.extrc_list('document', 'passage', '.', xml_str=res, ret_type='elem')
+			prgrphs = xmlextrc.extrc_list('document', 'passage', '.', xml_str=res, ret_type='elem') if res else []
 			doc_text = '\n'.join([prgrph.find('text').text for prgrph in prgrphs if prgrph.find('text')])
 			for annot in func.flatten_list([xmlextrc.extrc_list('passage', 'annotation', '.', xml_tree=prgrph, ret_type='elem') for prgrph in prgrphs]):
 				data = {}
@@ -999,10 +996,10 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 				entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][2].append(events['type'][i])
 				entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][3] = [events['oprnd_tps'][i][1], events['oprnd_tps'][i][0]]
 				# Inconsistent annotation
-				if (EVNT_ARG_TYPE[source][events['type'][i]][0] != events['oprnd_tps'][i][0] or EVNT_ARG_TYPE[source][events['type'][i]][1] != events['oprnd_tps'][i][1]):
+				if (EVNT_ARG_TYPE[year][events['type'][i]][0] != events['oprnd_tps'][i][0] or EVNT_ARG_TYPE[year][events['type'][i]][1] != events['oprnd_tps'][i][1]):
 					print 'Event type %s has argument alias: %s %s!' % (events['type'][i], events['oprnd_tps'][i][0], events['oprnd_tps'][i][1])
-					entity_pairs[(events['oprnds'][i][0], events['oprnds'][i][1])][3] = EVNT_ARG_TYPE[source][events['type'][i]]
-					entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][3] = EVNT_ARG_TYPE[source][events['type'][i]][::-1]
+					entity_pairs[(events['oprnds'][i][0], events['oprnds'][i][1])][3] = EVNT_ARG_TYPE[year][events['type'][i]]
+					entity_pairs[(events['oprnds'][i][1], events['oprnds'][i][0])][3] = EVNT_ARG_TYPE[year][events['type'][i]][::-1]
 				ok_samples.extend([events['oprnds'][i], events['oprnds'][i][::-1]])
 				idx_pair = annots['id'].index(events['oprnds'][i][0]), annots['id'].index(events['oprnds'][i][1])
 				stat_type = stat_oprnd_annot.setdefault(events['type'][i], [{},{}])
@@ -1049,18 +1046,18 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			direction.append(entity_pairs[output_samples[i]][1])
 			label.append(entity_pairs[output_samples[i]][2])
 			entity_label.append(entity_pairs[output_samples[i]][3])
-	if (len(stat_oprnd_annot) > 0): io.write_obj(stat_oprnd_annot, os.path.join(DATA_PATH, source, task, '%s_stat_oprnd_annot' % dataset))
+	if (len(stat_oprnd_annot) > 0): io.write_obj(stat_oprnd_annot, os.path.join(DATA_PATH, year, task, '%s_stat_oprnd_annot' % dataset))
 	## Feature Construction
 	from keras.preprocessing import sequence
 	cbow_seqs = [sequence.pad_sequences(x, maxlen=maxlen, dtype='int64', padding='pre', truncating='pre', value=last_widx) for x in zip(*cbow)]
 	feat_dfs = [pd.DataFrame(mt, index=evnt_index, columns=['cbow_%i'%i for i in range(mt.shape[1])], dtype='int64') for mt in cbow_seqs]
 	for i, df in enumerate(feat_dfs):
 		if (fmt == 'npz'):
-			io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
+			io.write_df(df, os.path.join(DATA_PATH, year, task, '%s_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
 		elif (fmt == 'h5'):
-			df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_X%i' % (prefix, dataset, i), format='table', data_columns=True)
+			df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_X%i' % (prefix, dataset, i), format='table', data_columns=True)
 		else:
-			df.to_csv(os.path.join(DATA_PATH, source, task, '%s_X%i.csv' % (dataset, i)), encoding='utf8')
+			df.to_csv(os.path.join(DATA_PATH, year, task, '%s_X%i.csv' % (dataset, i)), encoding='utf8')
 	# Obtain the entity indices
 	lent_index = ['|'.join(idx.split('|')[:2]) for idx in evnt_index]
 	lent_feat_dfs = [x.set_index([lent_index]).reset_index().drop_duplicates(subset='index').set_index('index') for x in feat_dfs[:2]]
@@ -1076,7 +1073,7 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			for j in range(len(direction[i])):
 				idx = bin_label[1].index(label[i][j])
 				bin_label[0][i][idx] = bin_label[0][i][idx] * direction[i][j]
-		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[':'.join([lb] + EVNT_ARG_TYPE[source][lb]) for lb in bin_label[1]], dtype='int8')
+		label_df = pd.DataFrame(bin_label[0], index=evnt_index, columns=[':'.join([lb] + EVNT_ARG_TYPE[year][lb]) for lb in bin_label[1]], dtype='int8')
 		# Labels for entity types
 		lent_label, rent_label = zip(*[x if x else ['Unknown']*2 for x in entity_label])
 		# ent_label = lent_label
@@ -1107,35 +1104,35 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 		lent_df.index, rent_df.index = evnt_index, evnt_index
 		ent_dfs = [lent_df, rent_df]
 		if (fmt == 'npz'):
-			io.write_df(label_df, os.path.join(DATA_PATH, source, task, '%s_Y.npz' % dataset), sparse_fmt=spfmt, compress=True)
-			io.write_df(ent_label_df, os.path.join(DATA_PATH, source, task, '%s_ent_Y.npz' % dataset), sparse_fmt=spfmt, compress=True)
-			_ = [io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_feat_dfs)]
-			# io.write_df(ent_df, os.path.join(DATA_PATH, source, task, '%s_pseudo_X.npz' % dataset), sparse_fmt=None, compress=True)
-			_ = [io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_pseudo_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_dfs)]
+			io.write_df(label_df, os.path.join(DATA_PATH, year, task, '%s_Y.npz' % dataset), sparse_fmt=spfmt, compress=True)
+			io.write_df(ent_label_df, os.path.join(DATA_PATH, year, task, '%s_ent_Y.npz' % dataset), sparse_fmt=spfmt, compress=True)
+			_ = [io.write_df(df, os.path.join(DATA_PATH, year, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_feat_dfs)]
+			# io.write_df(ent_df, os.path.join(DATA_PATH, year, task, '%s_pseudo_X.npz' % dataset), sparse_fmt=None, compress=True)
+			_ = [io.write_df(df, os.path.join(DATA_PATH, year, task, '%s_pseudo_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True) for i, df in enumerate(ent_dfs)]
 		elif (fmt == 'h5'):
-			label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_Y' % (prefix, dataset), format='table', data_columns=True)
-			ent_label_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_ent_Y' % (prefix, dataset), format='table', data_columns=True)
-			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_ent_X%i' % (prefix, dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_feat_dfs)]
-			# ent_df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_pseudo_X' % (prefix, dataset), format='table', data_columns=True)
-			_ = [df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_pseudo_X%i' % (prefix, dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_dfs)]
+			label_df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_Y' % (prefix, dataset), format='table', data_columns=True)
+			ent_label_df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_ent_Y' % (prefix, dataset), format='table', data_columns=True)
+			_ = [df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_ent_X%i' % (prefix, dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_feat_dfs)]
+			# ent_df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_pseudo_X' % (prefix, dataset), format='table', data_columns=True)
+			_ = [df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_pseudo_X%i' % (prefix, dataset, i), format='table', data_columns=True) for i, df in enumerate(ent_dfs)]
 		else:
-			label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_Y.csv' % dataset), encoding='utf8')
-			ent_label_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_Y.csv' % dataset), encoding='utf8')
-			_ = [df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8') for i, df in enumerate(ent_feat_dfs)]
-			# ent_df.to_csv(os.path.join(DATA_PATH, source, task, '%s_pseudo_X.csv' % dataset), encoding='utf8')
-			_ = [df.to_csv(os.path.join(DATA_PATH, source, task, '%s_pseudo_X%i.csv' % (dataset, i)), encoding='utf8') for i, df in enumerate(ent_dfs)]
+			label_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_Y.csv' % dataset), encoding='utf8')
+			ent_label_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_ent_Y.csv' % dataset), encoding='utf8')
+			_ = [df.to_csv(os.path.join(DATA_PATH, year, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8') for i, df in enumerate(ent_feat_dfs)]
+			# ent_df.to_csv(os.path.join(DATA_PATH, year, task, '%s_pseudo_X.csv' % dataset), encoding='utf8')
+			_ = [df.to_csv(os.path.join(DATA_PATH, year, task, '%s_pseudo_X%i.csv' % (dataset, i)), encoding='utf8') for i, df in enumerate(ent_dfs)]
 		# if (ret_field == 'all'): return feat_dfs + ent_feat_dfs + [ent_df], [label_df, ent_label_df]
 		if (ret_field == 'all'): return feat_dfs + ent_feat_dfs + ent_dfs, [label_df, ent_label_df]
 		return feat_dfs, label_df if (ret_field == 'event') else ent_feat_dfs, ent_label_df
 	else:
-		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, source, task, 'test_rawdata.pkl'))
+		io.write_obj(raw_data, fpath=os.path.join(DATA_PATH, year, task, 'test_rawdata.pkl'))
 		for i, df in enumerate(ent_feat_dfs):
 			if (fmt == 'npz'):
-				io.write_df(df, os.path.join(DATA_PATH, source, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
+				io.write_df(df, os.path.join(DATA_PATH, year, task, '%s_ent_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)
 			elif (fmt == 'h5'):
-				df.to_hdf(os.path.join(DATA_PATH, source, task, 'dataset.h5'), '%s/%s_ent_X%i' % (prefix, dataset, i), format='table', data_columns=True)
+				df.to_hdf(os.path.join(DATA_PATH, year, task, 'dataset.h5'), '%s/%s_ent_X%i' % (prefix, dataset, i), format='table', data_columns=True)
 			else:
-				df.to_csv(os.path.join(DATA_PATH, source, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8')
+				df.to_csv(os.path.join(DATA_PATH, year, task, '%s_ent_X%i.csv' % (dataset, i)), encoding='utf8')
 		if (ret_field == 'all'): return feat_dfs + ent_feat_dfs, raw_data
 		return feat_dfs, raw_data if (ret_field == 'event') else ent_feat_dfs, raw_data
 
@@ -1151,36 +1148,36 @@ def pred2data(preds, method='cbow', scheme='', **kwargs):
 			return pred2data_trg(preds, **kwargs)
 	elif (method == 'cbow'):
 		return pred2data_cbow(preds, **kwargs)
-	
-		
-def pred2data_cbow(preds, source='2016', task='bb'):
+
+
+def pred2data_cbow(preds, year='2016', task='bb'):
 	events = {}
 	for i, row in preds.iterrows():
 		docid, lent, rent = row.name.split('|')
 		for evnt_args, direction in row[row!=0].iteritems():
 			evnt_type, lent_type, rent_type = evnt_args.split(':')
 			if (direction == -1): lent_type, lent, rent_type, rent = rent_type, rent, lent_type, lent
-			if (EVNT_ARG_TYPE[source][evnt_type][0] != lent_type or EVNT_ARG_TYPE[source][evnt_type][1] != rent_type): continue
+			if (EVNT_ARG_TYPE[year][evnt_type][0] != lent_type or EVNT_ARG_TYPE[year][evnt_type][1] != rent_type): continue
 			events.setdefault(docid, []).append((evnt_type, ':'.join([lent_type, lent]), ':'.join([rent_type, rent])))
 	return events
-			
 
-def to_a2(events, dir_path='.', source='2016', task='bb'):
-	if (source == '2016'):
+
+def to_a2(events, dir_path='.', year='2016', task='bb'):
+	if (year == '2016'):
 		to_a2_2016(events, dir_path)
-	elif (source == '2013'):
+	elif (year == '2013'):
 		to_a2_2016(events, dir_path)
-	elif (source == '2011'):
+	elif (year == '2011'):
 		to_a2_2011(events, dir_path)
-		
-		
+
+
 def to_a2_2011(events, dir_path='.'):
 	fs.mkdir(dir_path)
 	for docid, event_list in events.iteritems():
 		content = '\n'.join(['E%i\t%s' % (i+1, x) for i, x in enumerate(list(set([' '.join(evnt) for evnt in event_list])))]) + '\n'
 		fs.write_file(content, os.path.join(dir_path, '%s.a2' % docid))
-		
-		
+
+
 def to_a2_2016(events, dir_path='.'):
 	fs.mkdir(dir_path)
 	for docid, event_list in events.iteritems():
