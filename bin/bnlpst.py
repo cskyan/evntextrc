@@ -898,7 +898,7 @@ def get_data_jointee(raw_data, from_file=None, iterator=False, batch_size=32, da
 
 ## Start Non-Trigger Approach ##
 
-def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, prefix='cbow', dataset='train', year='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', cw2v_path=None, window_size=10, include_target=True, maxlen=None, npg_ratio=1.0, concept_embed=False):
+def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, batch_size=32, prefix='cbow', dataset='train', year='2016', task='bb', fmt='npz', spfmt='csr', w2v_path='wordvec.bin', cw2v_path=None, window_size=10, include_target=True, maxlen=None, npg_ratio=1.0, concept_embed=False, avg_embed='none'):
 	# Read from local files
 	if (from_file):
 		if (type(from_file) == bool):
@@ -937,6 +937,7 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 	last_widx = w2v_wrapper.get_vocab_size() - 1
 	## Feature columns
 	evnt_index, cbow, annot_cbow, direction, label, entity_label = [[] for i in range(6)]
+	if (concept_embed and avg_embed != 'none'): cncptembd = []
 	stat_oprnd_annot = {}
 	## Extract features from raw data
 	for docid, corpus, preprcs, events in itertools.izip(raw_data['docids'], raw_data['corpus'], raw_data['preprcs'], raw_data['evnts']):
@@ -972,14 +973,20 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 							if (loc[1] < concepts[cncpt_offset][2][0]): break
 							overlap += min(loc[1], concepts[cncpt_offset][2][1]) - max(loc[0], concepts[cncpt_offset][2][0])
 							cncpt_unmatch = False
-				if (1.0 * overlap / len(astr)) > 0.5:
+				if (1.0 * overlap / len(astr) > 0.5 and avg_embed != 'all'):
 					print 'Found concept: %s in the annotated entity %s!' % (concepts[cncpt_offset][0], astr)
+					# Average Embedding
+					# if (avg_embed == 'all'):
+					# 	annots['embedding_id'].append(
 					if (cw2v_path is not None and os.path.exists(cw2v_path)):
 						annots['embedding_id'].append(cw2v_wrapper.word2idx(concepts[cncpt_offset][1], inexistence=last_widx))
 					else:
 						annots['embedding_id'].append(w2v_wrapper.word2idx(concepts[cncpt_offset][1], inexistence=last_widx))
 				else:
-					annots['embedding_id'].append(w2v_wrapper.word2idx(atype, inexistence=last_widx))
+					if (avg_embed == 'all' or avg_embed == 'part'):
+						annots['embedding_id'].append([w2v_wrapper.word2idx(annot_str, inexistence=last_widx) for annot_str in astr.split()])
+					else:
+						annots['embedding_id'].append(w2v_wrapper.word2idx(atype, inexistence=last_widx))
 		else:
 			annots['embedding_id'] = [w2v_wrapper.word2idx(w, inexistence=last_widx) for w in annots['type']] # entity type
 			# annots['embedding_id'] = [last_widx for x in range(len(annots['str']))]
@@ -1037,11 +1044,17 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 			# annot_cbow_list = vecomnet.get_cbow_context(annots['embedding_id'], [e_sub, e_obj], window_size=window_size/2, include_target=include_target)
 			cbow_list = cbow_list[0] + cbow_list[1]
 			if (concept_embed):
-				for cl, annot_eid in zip(cbow_list, [annots['embedding_id'][e_sub]] * 2 + [annots['embedding_id'][e_obj]] * 2):
-					cl.append(annot_eid)
+				if avg_embed == 'none':
+					for cl, annot_eid in zip(cbow_list, [annots['embedding_id'][e_sub]] * 2 + [annots['embedding_id'][e_obj]] * 2):
+						_ = cl.append(annot_eid)
+				else:
+					cncptembd_list = [[] for x in range(4)]
+					for cl, annot_eid in zip(cncptembd_list, [annots['embedding_id'][e_sub]] * 2 + [annots['embedding_id'][e_obj]] * 2):
+						_ = cl.extend(annot_eid) if type(annot_eid) is list else cl.append(annot_eid)
 			# annot_cbow_list = annot_cbow_list[0] + annot_cbow_list[1]
 			evnt_index.append('|'.join((docid, output_samples[i][0], output_samples[i][1])))
 			cbow.append(cbow_list)
+			if concept_embed and avg_embed != 'none': cncptembd.append(cncptembd_list)
 			# annot_cbow.append(annot_cbow_list)
 			direction.append(entity_pairs[output_samples[i]][1])
 			label.append(entity_pairs[output_samples[i]][2])
@@ -1050,7 +1063,14 @@ def get_data_cbow(raw_data, from_file=None, ret_field='all', iterator=False, bat
 	## Feature Construction
 	from keras.preprocessing import sequence
 	cbow_seqs = [sequence.pad_sequences(x, maxlen=maxlen, dtype='int64', padding='pre', truncating='pre', value=last_widx) for x in zip(*cbow)]
+	if concept_embed and avg_embed != 'none':
+		cncpt_maxlen = max([len(annot_eid) for cl in cncptembd for annot_eid in cl])
+		print('Average Concept Word Number in %s Dataset: %i' % (dataset, cncpt_maxlen))
+		cncpt_seqs = [sequence.pad_sequences(x, maxlen=cncpt_maxlen, dtype='int64', padding='pre', truncating='pre', value=0) for x in zip(*cncptembd)]
 	feat_dfs = [pd.DataFrame(mt, index=evnt_index, columns=['cbow_%i'%i for i in range(mt.shape[1])], dtype='int64') for mt in cbow_seqs]
+	if concept_embed and avg_embed != 'none':
+		cncpt_dfs = [pd.DataFrame(mt, index=evnt_index, columns=['cncpt_%i'%i for i in range(mt.shape[1])], dtype='int64') for mt in cncpt_seqs]
+		feat_dfs = [pd.concat([wdf, cdf], axis=1) for wdf, cdf in zip(feat_dfs, cncpt_dfs)]
 	for i, df in enumerate(feat_dfs):
 		if (fmt == 'npz'):
 			io.write_df(df, os.path.join(DATA_PATH, year, task, '%s_X%i.npz' % (dataset, i)), sparse_fmt=None, compress=True)

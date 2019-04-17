@@ -368,7 +368,7 @@ def gen_cbnn_models(input_dim, output_dim, epochs=1, batch_size=32, **kwargs):
 		tuned = tuned or opts.best
 		common_cfg = cfgr('evnt_extrc', 'common')
 		pr = io.param_reader(os.path.join(PAR_DIR, 'etc', '%s.yaml' % common_cfg.setdefault('mdl_cfg', 'mdlcfg')))
-		kw_args = dict([(arg, kwargs[param]) for param, arg in [('class_weight', 'class_weight'), ('pretrain_vecmdl', 'pretrain_vecmdl'), ('precomp_vec', 'precomp_vec'), ('test_ratio', 'validation_split')] if kwargs.has_key(param)])
+		kw_args = dict([(arg, kwargs[param]) for param, arg in [('class_weight', 'class_weight'), ('pretrain_vecmdl', 'pretrain_vecmdl'), ('precomp_vec', 'precomp_vec'), ('test_ratio', 'validation_split'), ('avgembd_idx', 'avgembd_idx')] if kwargs.has_key(param)])
 		if (opts.scheme == 'cbow_ent'):
 			models = [
 				('VecEntNet', gen_keras(input_dim, output_dim, model=kwargs.setdefault('prefered_mdl', 'vecentnet'), w2v_path=kwargs.setdefault('w2v_path', None), cw2v_path=kwargs.setdefault('cw2v_path', None), epochs=epochs, batch_size=batch_size, shuffle='batch', **func.update_dict(pr('NeuralNetwork', 'VecEntNet') if tuned else {}, kw_args))),
@@ -980,6 +980,11 @@ def entity_cbow(prefix='cbow', fusion=False):
 	kwargs = dict(input_dim=all_train_Xs[0].shape[1], output_dim=all_train_Y.shape[1] if len(all_train_Y.shape) > 1 else 1, epochs=opts.epochs, batch_size=opts.bsize, prefered_mdl='vecentnet', class_weight=np.array([imath.mlb_clsw(all_train_Y.iloc[:,i], norm=True) for i in range(all_train_Y.shape[1])]).reshape((-1,)) if len(all_train_Y.shape)>1 and all_train_Y.shape[1]>1 else imath.mlb_clsw(all_train_Y, norm=True))
 	# kwargs = dict(input_dim=all_train_Xs[0].shape[1], output_dim=all_train_Y.shape[1] if len(all_train_Y.shape) > 1 else 1, test_ratio=0.1, epochs=opts.epochs, batch_size=opts.bsize, class_weight=np.array([imath.mlb_clsw(all_train_Y.iloc[:,i], norm=True) for i in range(all_train_Y.shape[1])]).reshape((-1,)) if len(all_train_Y.shape)>1 and all_train_Y.shape[1]>1 else imath.mlb_clsw(all_train_Y, norm=True))
 	if (opts.cncptw2v is not None and os.path.exists(opts.cncptw2v)): kwargs['cw2v_path'] = opts.cncptw2v
+	if (opts.avgcncpt):
+		x = all_train_Xs[0]
+		cncpt_indices = np.sort(np.where(x.columns.str.contains('cncpt_'))[0])
+		avgembd_idx = cncpt_indices[0], cncpt_indices[-1] + 1
+		kwargs['avgembd_idx'] = avgembd_idx
 	if (opts.dend is not None):
 		print 'DNN model parameters: %s' % kwargs
 		model_iter = gen_cbnn_models(**kwargs) if opts.comb else gen_nn_bm_models(**kwargs)
@@ -1703,6 +1708,7 @@ if __name__ == '__main__':
 	op.add_option('--crsdev', action='store_true', dest='crsdev', default=False, help='whether to use heterogeneous devices')
 	op.add_option('-w', '--cache', type='str', dest='cache', help='the pretrained model path or partial prediction path')
 	op.add_option('--cncptw2v', dest='cncptw2v', help='indicate whether use the concept embedding separately')
+	op.add_option('--avgcncpt', action='store_true', dest='avgcncpt', default=False, help='indicate whether use average concept embedding')
 	op.add_option('-i', '--input', default='bnlpst', help='input source: bnlpst or pbmd [default: %default]')
 	op.add_option('-y', '--year', default='2016', help='the year when the data is released: 2016 or 2011 [default: %default]')
 	op.add_option('-u', '--task', default='ddi', help='the task name [default: %default]')
