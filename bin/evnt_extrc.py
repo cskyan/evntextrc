@@ -904,7 +904,8 @@ def all_cbow(prefix='cbow', fusion=False):
 					test_Xs = [pd.concat([pd.read_hdf(store, key='cbow/test_argvec%i_X%i' % (arg_idx, i)) for arg_idx in arg_idcs], axis=1) for i, arg_idcs in enumerate(evnt_arg_idcs)]
 			else:
 				all_train_Xs = kwargs['precomp_vec'] = train_argvecs
-				test_Xs, test_Y = dev_argvecs, dev_Y
+				dev_Xs = dev_argvecs
+				# test_Xs, test_Y = dev_argvecs, dev_Y
 			if (not opts.mltl and 'all_train_idx' in locals()):
 				all_train_Xs = [x.iloc[all_train_idx] for x in all_train_Xs]
 	print 'Training dataset size of X and Y: %s' % str(([x.shape for x in all_train_Xs], all_train_Y.shape))
@@ -916,6 +917,8 @@ def all_cbow(prefix='cbow', fusion=False):
 	if (opts.cncptw2v is not None and os.path.exists(opts.cncptw2v)): kwargs['cw2v_path'] = opts.cncptw2v
 	# Convert the directed labels into binary (optional, only for vecomnet)
 	all_train_Y = pd.DataFrame(np.column_stack([np.abs(all_train_Y.values).reshape((all_train_Y.shape[0],-1))] + [label_binarize(lb, classes=[-1,1,0])[:,1] for lb in (np.sign(all_train_Y.values).astype('int8').reshape((all_train_Y.shape[0],-1))).T]), index=all_train_Y.index, columns=all_train_Y.columns.tolist() + ['%s_Dir' % col for col in all_train_Y.columns])
+	if opts.eval:
+		dev_Y = pd.DataFrame(np.column_stack([np.abs(dev_Y.values).reshape((dev_Y.shape[0],-1))] + [label_binarize(lb, classes=[-1,1,0])[:,1] for lb in (np.sign(dev_Y.values).astype('int8').reshape((dev_Y.shape[0],-1))).T]), index=dev_Y.index, columns=dev_Y.columns.tolist() + ['%s_Dir' % col for col in dev_Y.columns])
 	print 'Modified training dataset size of X and Y: %s' % str(([x.shape for x in all_train_Xs], all_train_Y.shape))
 	orig_signed, orig_mltl = signed, opts.mltl
 	signed, opts.mltl = False, True
@@ -936,8 +939,10 @@ def all_cbow(prefix='cbow', fusion=False):
 	else:
 		if (opts.eval and 'test_Y' in locals()):
 			txtclf.evaluate(all_train_Xs, all_train_Y, test_Xs, test_Y, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'evaluate'), global_param=global_param, lbid='' if orig_mltl else opts.pid)
-		else:
+		elif (fusion):
 			txtclf.cross_validate(all_train_Xs, all_train_Y, model_iter, model_param=model_param, avg=opts.avg, kfold=opts.kfold, cfg_param=cfgr('bionlp.txtclf', 'cross_validate'), split_param={'shuffle':True}, global_param=global_param, lbid='' if orig_mltl else opts.pid)
+		else:
+			txtclf.evaluate(all_train_Xs, all_train_Y, dev_Xs, dev_Y, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'evaluate'), global_param=global_param, lbid='' if orig_mltl else opts.pid)
 
 	signed, opts.mltl = orig_signed, orig_mltl
 
@@ -999,7 +1004,13 @@ def entity_cbow(prefix='cbow', fusion=False):
 	if (opts.pred):
 		preds, scores = txtclf.classification(all_train_Xs, all_train_Y, test_Xs, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'classification'), global_param=global_param, lbid='' if opts.mltl else opts.pid)
 	else:
-		txtclf.cross_validate(all_train_Xs, all_train_Y, model_iter, model_param=model_param, avg=opts.avg, kfold=opts.kfold, cfg_param=cfgr('bionlp.txtclf', 'cross_validate'), split_param={'shuffle':True}, global_param=global_param, lbid='' if opts.mltl else opts.pid)
+		if (opts.eval and 'test_Y' in locals()):
+			txtclf.evaluate(all_train_Xs, all_train_Y, test_Xs, test_Y, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'evaluate'), global_param=global_param, lbid='' if orig_mltl else opts.pid)
+		elif (fusion):
+			txtclf.cross_validate(all_train_Xs, all_train_Y, model_iter, model_param=model_param, avg=opts.avg, kfold=opts.kfold, cfg_param=cfgr('bionlp.txtclf', 'cross_validate'), split_param={'shuffle':True}, global_param=global_param, lbid='' if opts.mltl else opts.pid)
+		else:
+			dev_Y = dev_Y.loc[:,all_train_Y.columns[0]].to_frame() if all_train_Y.columns[0] in dev_Y.columns.tolist() else dev_Y
+			txtclf.evaluate(all_train_Xs, all_train_Y, dev_Xs, dev_Y, model_iter, model_param=model_param, cfg_param=cfgr('bionlp.txtclf', 'evaluate'), global_param=global_param, lbid='' if opts.mltl else opts.pid)
 
 
 def all_entry():
@@ -1303,6 +1314,8 @@ def _arg_embed(demo_obj, evnt_argids, train_ent_evnt_map, all_train_evnt_stat, m
 							time.sleep(5)
 			## Parallel Barrier End ##
 			with kerasext.gen_cntxt('tf', **dict(device='/cpu:0')): # Store the argument embedding in the unified location
+			# import tensorflow as tf
+			# with tf.device('/cpu:0'):
 				cntxvec_fpath='cntxvec_%i.h5' % i
 				print 'Storing argument embedding in %s:%s' % (cntxvec_fpath, cntx_prefix)
 				helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), demo_obj.data_path, ['%s/train_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath=cntxvec_fpath, cntxvec_path='%s/train_' % cntx_prefix, crsdev=demo_obj.crsdev, load_alone_layers=[['WordEmbedding'],['ConceptEmbedding']], alone_noprfx=demo_obj.alnoprfx)
@@ -1480,6 +1493,8 @@ def demo():
 	data_path = os.path.join(spdr.DATA_PATH, opts.year, opts.task, 'dataset.h5')
 	all_evnt_args = pd.read_hdf(data_path, key='cbow/train_ent_Y').columns.tolist()
 	all_events = pd.read_hdf(data_path, key='cbow/train_Y').columns.tolist()
+	exec_evnt_id = opts.pid if type(opts.pid) is int and opts.pid > -1 else None
+	exec_ent_ids = [all_evnt_args.index(x) for x in all_events[exec_evnt_id].split(':')[1:]]
 	prefix = cntx_prefix = 'cbow_regen' if opts.regen else 'cbow'
 	to_pred = opts.pred
 	# Cross-validation
@@ -1509,17 +1524,19 @@ def demo():
 		all_train_evnt_stat = all_train_evnt_Y.abs().sum(axis=0)
 		train_ent_evnt_map = [[(i, evnt) for i, evnt in enumerate(all_events) if ent in evnt] for ent in all_evnt_args]
 	## Parallel with fork Start ##
-	sub_pid = 9999
-	jobpp = math.ceil(1.0 * len(all_evnt_args) / opts.np)
-	os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
+	if (opts.np > 1):
+		sub_pid = 9999
+		jobpp = math.ceil(1.0 * len(all_evnt_args) / opts.np)
+		os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 	## Parallel with fork End ##
-	for i in range(len(all_evnt_args)):
+	for i in exec_ent_ids if exec_evnt_id is not None else range(len(all_evnt_args)):
 		if (opts.cache is not None and opts.cache == 'skip'): break
 		## Parallel with fork Start ##
-		jobid = i % jobpp
-		if (sub_pid != 0):
-			sub_pid = os.fork() if (jobid == 0) else -1
-		if (sub_pid != 0 or sub_pid == -1): continue
+		if (opts.np > 1):
+			jobid = i % jobpp
+			if (sub_pid != 0):
+				sub_pid = os.fork() if (jobid == 0) else -1
+			if (sub_pid != 0 or sub_pid == -1): continue
 		## Parallel with fork End ##
 		opts.pid = i
 		if (opts.regen):
@@ -1536,27 +1553,28 @@ def demo():
 			else:
 				mdl_dir = opts.cache
 			## Parallel with fork Start ##
-			if (opts.alnoprfx):
-				if (i == 0):
-					import h5py
-					layers = [['WordEmbedding'],['ConceptEmbedding']] if opts.cncptw2v else [['WordEmbedding']]
-					while True:
-						try:
-							for layer_names in layers:
-								layer_names = layer_names if type(layer_names) is list else [layer_names]
-								filepath = '_'.join(map(str.lower, layer_names)).replace(' ', '_').replace('-', '_') + '.h5'
-								with h5py.File(filepath, mode='r', libver='latest', swmr=True) as f:
-									pass
-							break
-						except:
-							time.sleep(5)
-					open('.barrier.fork', 'a').close()
-				else:
-					while True:
-						if os.path.isfile('.barrier.fork'):
-							break
-						else:
-							time.sleep(5)
+			if (opts.np > 1):
+				if (opts.alnoprfx):
+					if (i == 0):
+						import h5py
+						layers = [['WordEmbedding'],['ConceptEmbedding']] if opts.cncptw2v else [['WordEmbedding']]
+						while True:
+							try:
+								for layer_names in layers:
+									layer_names = layer_names if type(layer_names) is list else [layer_names]
+									filepath = '_'.join(map(str.lower, layer_names)).replace(' ', '_').replace('-', '_') + '.h5'
+									with h5py.File(filepath, mode='r', libver='latest', swmr=True) as f:
+										pass
+								break
+							except:
+								time.sleep(5)
+						open('.barrier.fork', 'a').close()
+					else:
+						while True:
+							if os.path.isfile('.barrier.fork'):
+								break
+							else:
+								time.sleep(5)
 			## Parallel with fork End ##
 			with kerasext.gen_cntxt(opts.dend, **dict(device='/cpu:0')): # Store the argument embedding in the unified location
 				cntxvec_fpath='cntxvec_%i.h5' % i
@@ -1566,21 +1584,23 @@ def demo():
 				if (opts.fusion):
 					helper._contex2vec(os.path.join(mdl_dir, 'vecentnet_clf_%i.pkl' % i), data_path, ['%s/test_X%i' % (prefix, k) for k in range(4)], cntxvec_fpath=cntxvec_fpath, cntxvec_path='%s/test_' % cntx_prefix, crsdev=opts.crsdev, load_alone_layers=[['WordEmbedding'],['ConceptEmbedding']], alone_noprfx=opts.alnoprfx)
 		## Parallel with fork Start ##
-		if (i == len(all_evnt_args) - 1):
-			open('.jobdone.fork', 'a').close()
-			os._exit(0)
-		if (sub_pid == 0 and jobid == jobpp - 1): os._exit(0)
-	while True:
-		if os.path.isfile('.jobdone.fork'):
-			break
-		else:
-			time.sleep(10)
-	os.remove('.jobdone.fork')
+		if (opts.np > 1):
+			if (i == len(all_evnt_args) - 1):
+				open('.jobdone.fork', 'a').close()
+				os._exit(0)
+			if (sub_pid == 0 and jobid == jobpp - 1): os._exit(0)
+	if (opts.np > 1):
+		while True:
+			if os.path.isfile('.jobdone.fork'):
+				break
+			else:
+				time.sleep(10)
+		os.remove('.jobdone.fork')
 		## Parallel with fork End ##
 	# Combine the context embedding vectors of different arguments
 	import h5py
 	with h5py.File('cntxvec.h5', mode='w') as f:
-		for i in range(len(all_evnt_args)):
+		for i in exec_ent_ids if exec_evnt_id is not None else range(len(all_evnt_args)):
 			h5fpath = 'cntxvec_%i.h5' % i
 			if (not os.path.isfile(h5fpath)): h5fpath = os.path.abspath(os.path.join(os.path.pardir, h5fpath))
 			while True:
@@ -1613,7 +1633,7 @@ def demo():
 	prefix = cntx_prefix = 'cbow_regen' if opts.regen else 'cbow'
 	opts.cache = 'embed:%s|%s' % (data_path, cntx_prefix)
 	orig_wd = os.getcwd()
-	for i in range(len(all_events)):
+	for i in [exec_evnt_id] if exec_evnt_id is not None else range(len(all_events)):
 		cntxvec_path = os.path.join(orig_wd, 'cntxvec.h5')
 		if (not os.path.isfile(cntxvec_path)):
 			cntxvec_path = os.path.abspath(os.path.join(orig_wd, os.pardir, 'cntxvec.h5'))
@@ -1621,10 +1641,11 @@ def demo():
 				print 'Cannot find the context embedding file %s' % cntxvec_path
 				continue
 		## Parallel with fork Start ##
-		jobid = i % jobpp
-		if (sub_pid != 0):
-			sub_pid = os.fork() if (jobid == 0) else -1
-		if (sub_pid != 0 or sub_pid == -1): continue
+		if (opts.np > 1):
+			jobid = i % jobpp
+			if (sub_pid != 0):
+				sub_pid = os.fork() if (jobid == 0) else -1
+			if (sub_pid != 0 or sub_pid == -1): continue
 		## Parallel with fork End ##
 		opts.pid = 0 if opts.regen else i
 		new_wd = os.path.join(orig_wd, str(i))
@@ -1646,16 +1667,18 @@ def demo():
 				os.chdir(sub_orig_wd)
 		os.chdir(orig_wd)
 		## Parallel with fork Start ##
-		if (i == len(all_events) - 1):
-			open('.jobdone.fork', 'a').close()
-			os._exit(0)
-		if (sub_pid == 0 and jobid == jobpp - 1): os._exit(0)
-	while True:
-		if os.path.isfile('.jobdone.fork'):
-			break
-		else:
-			time.sleep(10)
-	os.remove('.jobdone.fork')
+		if (opts.np > 1):
+			if (i == len(all_events) - 1):
+				open('.jobdone.fork', 'a').close()
+				os._exit(0)
+			if (sub_pid == 0 and jobid == jobpp - 1): os._exit(0)
+	if (opts.np > 1):
+		while True:
+			if os.path.isfile('.jobdone.fork'):
+				break
+			else:
+				time.sleep(10)
+		os.remove('.jobdone.fork')
 		## Parallel with fork End ##
 	opts.cache = orig_cache
 	if (to_pred):
@@ -1757,7 +1780,7 @@ if __name__ == '__main__':
 			gpuq = [int(x) for x in opts.gpuq.split(',') if x]
 			# dev_id = gpuq[opts.pid % len(gpuq)]
 			dev_id = range(len(gpuq))[opts.pid % len(gpuq)]
-			os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpuq[:opts.gpunum]))
+			# os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpuq[:opts.gpunum])) # Should NOT enable this line when using tf
 		else:
 			dev_id = opts.pid % opts.gpunum if opts.gpunum > 0 else 0
 		from bionlp.model import kerasext, vecomnet
